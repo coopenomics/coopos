@@ -355,6 +355,7 @@ REGISTER_HOST_FUNCTION(activate_feature, privileged_check);
 REGISTER_LEGACY_HOST_FUNCTION(preactivate_feature, privileged_check);
 REGISTER_HOST_FUNCTION(set_resource_limits, privileged_check);
 REGISTER_LEGACY_HOST_FUNCTION(get_resource_limits, privileged_check);
+REGISTER_LEGACY_HOST_FUNCTION(get_account_ram_usage, privileged_check);
 REGISTER_HOST_FUNCTION(get_parameters_packed, privileged_check);
 REGISTER_HOST_FUNCTION(set_parameters_packed, privileged_check);
 REGISTER_HOST_FUNCTION(get_wasm_parameters_packed, privileged_check);

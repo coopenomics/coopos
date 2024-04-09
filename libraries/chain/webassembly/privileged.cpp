@@ -34,6 +34,11 @@ namespace eosio { namespace chain { namespace webassembly {
       }
    }
 
+   void interface::get_account_ram_usage( account_name account, legacy_ptr<int64_t> used_ram_bytes) const {
+      *used_ram_bytes = context.control.get_resource_limits_manager().get_account_ram_usage( account );
+      (void)legacy_ptr<int64_t>(std::move(used_ram_bytes));
+   }
+
    void interface::get_resource_limits( account_name account, legacy_ptr<int64_t> ram_bytes, legacy_ptr<int64_t> net_weight, legacy_ptr<int64_t> cpu_weight ) const {
       context.control.get_resource_limits_manager().get_account_limits( account, *ram_bytes, *net_weight, *cpu_weight);
       (void)legacy_ptr<int64_t>(std::move(ram_bytes));

@@ -69,6 +69,7 @@ inline constexpr auto get_intrinsic_table() {
       "env.__trunctfsf2",
       "env.is_feature_active",
       "env.activate_feature",
+      "env.get_account_ram_usage",
       "env.get_resource_limits",
       "env.set_resource_limits",
       "env.set_proposed_producers",
