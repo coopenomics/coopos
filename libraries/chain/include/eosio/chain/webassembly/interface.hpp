@@ -72,6 +72,16 @@ namespace webassembly {
          void set_resource_limits(account_name account, int64_t ram_bytes, int64_t net_weight, int64_t cpu_weight);
 
          /**
+          * Get RAM usage of account
+          *
+          * @ingroup privileged
+          *
+          * @param account - name of the account whose resource to get.
+          * @param[out] used_ram_bytes - currently used ram bytes of account.
+         */
+         void get_account_ram_usage(account_name account, legacy_ptr<int64_t, 8> used_ram_bytes) const;
+
+         /**
           * Get the resource limits of an account
           *
           * @ingroup privileged
