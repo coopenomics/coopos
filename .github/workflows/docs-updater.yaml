@@ -1,0 +1,18 @@
+# .github/workflows/trigger-coopenomics.yml
+name: Trigger Contracts Docs Deploy
+
+on:
+  push:
+    branches: [main] # или когда нужно триггерить
+
+jobs:
+  trigger-coopenomics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Coopenomics deployment
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.COOPENOMICS_PAT }}
+          repository: coopenomics/coopenomics # укажи правильный owner/repo
+          event-type: deploy_from_mono
+          client-payload: '{"repository": "${{ github.repository }}", "sha": "${{ github.sha }}", "ref": "${{ github.ref }}", "actor": "${{ github.actor }}"}'

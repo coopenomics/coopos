@@ -1,13 +1,13 @@
 openapi: 3.0.0
 info:
   title: Chain API
-  description: Nodeos Chain API Specification. See developer documentation at https://docs.eosnetwork.com for information on enabling this plugin.
+  description: Спецификация Nodeos Chain API. Смотри документацию разработчика на сайте https://coopenomics.world для получения более подробной информации.
   version: 1.0.0
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
   contact:
-    url: https://eosnetwork.com
+    url: https://coopenomics.world
 servers:
   - url: "{protocol}://{host}:{port}/v1/chain"
     variables:
