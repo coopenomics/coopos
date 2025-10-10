@@ -1,6 +1,6 @@
 cmake_minimum_required( VERSION 3.16 )
 
-project( leap )
+project( coopos )
 include(CTest) # suppresses DartConfiguration.tcl error
 enable_testing()
 
@@ -66,7 +66,7 @@ if(ENABLE_OC AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32)
       # can be created with the exact version found
       find_package(LLVM REQUIRED CONFIG)
       if(LLVM_VERSION_MAJOR VERSION_LESS 7 OR LLVM_VERSION_MAJOR VERSION_GREATER_EQUAL 12)
-	      message(FATAL_ERROR "Leap requires an LLVM version 7 through 11")
+	      message(FATAL_ERROR "Coopos requires an LLVM version 7 through 11")
       endif()
    endif()
 endif()
@@ -123,13 +123,13 @@ if(ENABLE_WEXTRA)
 endif()
 
 
-option(EOSIO_ENABLE_DEVELOPER_OPTIONS "enable developer options for Leap" OFF)
+option(EOSIO_ENABLE_DEVELOPER_OPTIONS "enable developer options for Coopos" OFF)
 
 # based on http://www.delorie.com/gnu/docs/gdb/gdb_70.html
 # uncomment this line to tell GDB about macros (slows compile times)
 # set( CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -gdwarf-2 -g3" )
 
-set(ENABLE_COVERAGE_TESTING FALSE CACHE BOOL "Build Leap for code coverage analysis")
+set(ENABLE_COVERAGE_TESTING FALSE CACHE BOOL "Build Coopos for code coverage analysis")
 
 if(ENABLE_COVERAGE_TESTING)
   SET(CMAKE_C_FLAGS   "--coverage ${CMAKE_C_FLAGS}")
@@ -162,7 +162,7 @@ message( STATUS "Using '${EOSIO_ROOT_KEY}' as public key for 'eosio' account" )
 option(ENABLE_TCMALLOC "use tcmalloc (requires gperftools)" OFF)
 if( ENABLE_TCMALLOC )
     find_package( Gperftools REQUIRED )
-    message( STATUS "Compiling Leap with TCMalloc")
+    message( STATUS "Compiling Coopos with TCMalloc")
     #if doing this by the book, simply link_libraries( ${GPERFTOOLS_TCMALLOC} ) here. That will
     #give the performance benefits of tcmalloc but since it won't be linked last
     #the heap profiler & checker may not be accurate. This here is rather undocumented behavior
@@ -198,7 +198,7 @@ set(EOS_ROOT_DIR "${CMAKE_BINARY_DIR}/lib")
 configure_file(${CMAKE_SOURCE_DIR}/CMakeModules/eosio-config.cmake.in ${CMAKE_BINARY_DIR}/lib/cmake/eosio/eosio-config.cmake @ONLY)
 configure_file(${CMAKE_SOURCE_DIR}/CMakeModules/EosioTesterBuild.cmake.in ${CMAKE_BINARY_DIR}/lib/cmake/eosio/EosioTester.cmake @ONLY)
 configure_file(${CMAKE_SOURCE_DIR}/CMakeModules/EosioCheckVersion.cmake ${CMAKE_BINARY_DIR}/lib/cmake/eosio/EosioCheckVersion.cmake COPYONLY)
-# new leap CMake files
+# new coopos CMake files
 configure_file(${CMAKE_SOURCE_DIR}/CMakeModules/leap-config.cmake.in ${CMAKE_BINARY_DIR}/lib/cmake/leap/leap-config.cmake @ONLY)
 configure_file(${CMAKE_SOURCE_DIR}/CMakeModules/EosioTesterBuild.cmake.in ${CMAKE_BINARY_DIR}/lib/cmake/leap/EosioTester.cmake @ONLY)
 configure_file(${CMAKE_SOURCE_DIR}/CMakeModules/EosioCheckVersion.cmake ${CMAKE_BINARY_DIR}/lib/cmake/leap/EosioCheckVersion.cmake COPYONLY)
@@ -210,7 +210,7 @@ configure_file(${CMAKE_SOURCE_DIR}/CMakeModules/eosio-config.cmake.in ${CMAKE_BI
 install(FILES ${CMAKE_BINARY_DIR}/modules/eosio-config.cmake DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR}/cmake/eosio COMPONENT dev EXCLUDE_FROM_ALL)
 install(FILES ${CMAKE_BINARY_DIR}/modules/EosioTester.cmake DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR}/cmake/eosio COMPONENT dev EXCLUDE_FROM_ALL)
 install(FILES ${CMAKE_SOURCE_DIR}/CMakeModules/EosioCheckVersion.cmake DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR}/cmake/eosio COMPONENT dev EXCLUDE_FROM_ALL)
-# new leap CMake files
+# new coopos CMake files
 configure_file(${CMAKE_SOURCE_DIR}/CMakeModules/leap-config.cmake.in ${CMAKE_BINARY_DIR}/modules/leap-config.cmake @ONLY)
 install(FILES ${CMAKE_BINARY_DIR}/modules/leap-config.cmake DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR}/cmake/leap COMPONENT dev EXCLUDE_FROM_ALL)
 install(FILES ${CMAKE_BINARY_DIR}/modules/EosioTester.cmake DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR}/cmake/leap COMPONENT dev EXCLUDE_FROM_ALL)

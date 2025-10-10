@@ -1,62 +1,163 @@
-# Leap
+# Coopos
 
 > [!IMPORTANT]
-> All versions of Leap are no longer supported by the EOS Network Foundation. To use a supported implementation of the Antelope protocol please consider using [Spring](https://github.com/AntelopeIO/spring).
+> Coopos - это модификация протокола LEAP для расширения возможностей смарт-контрактов в части управления RAM-ресурсами блокчейна.
 
-1. [Branches](#branches)
-2. [Supported Operating Systems](#supported-operating-systems)
-3. [Binary Installation](#binary-installation)
-4. [Build and Install from Source](#build-and-install-from-source)
-5. [Bash Autocomplete](#bash-autocomplete)
+1. [Ветки](#branches)
+2. [Быстрый старт с Docker](#docker-quick-start)
+3. [Поддерживаемые операционные системы](#supported-operating-systems)
+4. [Бинарная установка](#binary-installation)
+5. [Сборка и установка из исходного кода](#build-and-install-from-source)
+6. [Bash автодополнение](#bash-autocomplete)
 
-Leap is a C++ implementation of the [Antelope](https://github.com/AntelopeIO) protocol. It contains blockchain node software and supporting tools for developers and node operators.
+Coopos - это C++ реализация протокола [Antelope](https://github.com/AntelopeIO) с расширениями для кооперативной экономики. Содержит программное обеспечение блокчейн-узла и вспомогательные инструменты для разработчиков и операторов узлов.
 
-## Branches
-The `main` branch is the development branch; do not use it for production. Refer to the [release page](https://github.com/AntelopeIO/leap/releases) for current information on releases, pre-releases, and obsolete releases, as well as the corresponding tags for those releases.
+## Ветки
+Ветка `main` является веткой разработки; не используйте её для продакшена. Обратитесь к [странице релизов](https://github.com/AntelopeIO/leap/releases) для получения актуальной информации о релизах, предварительных релизах и устаревших релизах, а также соответствующих тегах для этих релизов.
 
-## Supported Operating Systems
-We currently support the following operating systems.
+## Быстрый старт с Docker
+
+Для быстрого знакомства с Coopos и разработки смарт-контрактов на любой операционной системе (Windows, macOS, Linux) рекомендуется использовать готовый Docker-контейнер.
+
+### Запуск контейнера
+
+```bash
+docker run -it --rm \
+  -v $(pwd)/workspace:/workspace \
+  -p 8888:8888 \
+  -p 9876:9876 \
+  -p 8070:8070 \
+  dicoop/blockchain_v5.1.1:dev
+```
+
+### Что включено в контейнер
+
+Контейнер основан на том же исходном коде Coopos и дополнительно содержит:
+- **CDT (Contract Development Toolkit)** - инструменты для компиляции смарт-контрактов
+- **eosio-cpp** - компилятор смарт-контрактов
+- **cleos** - командная строка для взаимодействия с блокчейном
+- **nodeos** - блокчейн-узел
+- **leap-util** - дополнительные утилиты
+- **Все необходимые зависимости** для разработки и запуска
+
+### Использование
+
+```bash
+# В контейнере вы можете сразу начать разработку
+cd /workspace
+
+# Создать новый смарт-контракт
+eosio-cpp -abigen hello.cpp -o hello.wasm
+
+# Запустить локальный блокчейн-узел с полным набором параметров
+nodeos \
+  # Основные плагины для работы блокчейн-узла
+  --plugin eosio::chain_plugin \
+  --plugin eosio::producer_plugin \
+  --plugin eosio::chain_api_plugin \
+  --plugin eosio::http_plugin \
+  --plugin eosio::state_history_plugin \
+  --plugin eosio::producer_api_plugin \
+  --plugin eosio::resource_monitor_plugin \
+  # Настройки производства блоков
+  --enable-stale-production true \
+  --read-only-read-window-time-us 120000 \
+  --producer-name eosio \
+  --producer-name core \
+  --signature-provider EOS6MRyAjQq8ud7hVNYcfnVPJqcVpscN5So8BhtHuGYqET5GDW5CV=KEY:5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3 \
+  # Сетевые настройки
+  --net-threads 2 \
+  --p2p-listen-endpoint 0.0.0.0:9876 \
+  # HTTP API настройки
+  --http-server-address 0.0.0.0:8888 \
+  --access-control-allow-origin "*" \
+  --access-control-allow-credentials false \
+  --http-validate-host false \
+  --verbose-http-errors true \
+  --http-max-response-time-ms 30000 \
+  --max-body-size 10485760 \
+  # Настройки производительности и лимитов
+  --max-transaction-time 2000 \
+  --abi-serializer-max-time-ms 200000 \
+  --max-block-cpu-usage-threshold-us 5000 \
+  --max-block-net-usage-threshold-bytes 1024 \
+  # Отладка и история
+  --contracts-console true \
+  --chain-state-history true \
+  --trace-history true \
+  --state-history-endpoint 0.0.0.0:8070 \
+  # Мониторинг ресурсов
+  --resource-monitor-space-threshold 90 \
+  --resource-monitor-not-shutdown-on-threshold-exceeded true \
+  # WASM runtime
+  --wasm-runtime eos-vm
+```
+
+### Монтирование рабочей директории
+
+Параметр `-v $(pwd)/workspace:/workspace` монтирует вашу локальную папку `workspace` в контейнер, позволяя работать с файлами на хост-системе.
+
+> ⚠️ **Важно:** Для регулярной стабильной работы и продакшена рекомендуется установка deb-пакета или сборка из исходного кода на нативной системе. Docker-контейнер предназначен для разработки и тестирования. 
+
+## Поддерживаемые операционные системы
+В настоящее время мы поддерживаем следующие операционные системы:
 - Ubuntu 22.04 Jammy
 - Ubuntu 20.04 Focal
 
-Other Unix derivatives such as macOS are tended to on a best-effort basis and may not be full featured. If you aren't using Ubuntu, please visit the "[Build Unsupported OS](./docs/00_install/01_build-from-source/00_build-unsupported-os.md)" page to explore your options.
+Другие Unix-производные, такие как macOS, поддерживаются в режиме best-effort и могут быть не полностью функциональными. Если вы не используете Ubuntu, посетите страницу "[Сборка неподдерживаемой ОС](./docs/00_install/01_build-from-source/00_build-unsupported-os.md)" для изучения ваших вариантов.
 
-If you are running an unsupported Ubuntu derivative, such as Linux Mint, you can find the version of Ubuntu your distribution was based on by using this command:
+Если вы используете неподдерживаемую производную Ubuntu, такую как Linux Mint, вы можете узнать версию Ubuntu, на которой она основана, используя эту команду:
 ```bash
 cat /etc/upstream-release/lsb-release
 ```
-Your best bet is to follow the instructions for your Ubuntu base, but we make no guarantees.
+Ваш лучший вариант - следовать инструкциям для вашей базовой версии Ubuntu, но мы не даём никаких гарантий.
 
-## Binary Installation
-This is the fastest way to get started. From the [latest release](https://github.com/AntelopeIO/leap/releases/latest) page, download a binary for one of our [supported operating systems](#supported-operating-systems), or visit the [release tags](https://github.com/AntelopeIO/leap/releases) page to download a binary for a specific version of Leap.
+## Бинарная установка
+Это самый быстрый способ начать работу. Со [страницы последнего релиза](https://github.com/AntelopeIO/leap/releases/latest) скачайте бинарный файл для одной из наших [поддерживаемых операционных систем](#supported-operating-systems), или посетите [теги релизов](https://github.com/AntelopeIO/leap/releases) для скачивания бинарного файла конкретной версии Coopos.
 
-Once you have a `*.deb` file downloaded for your version of Ubuntu, you can install it as follows:
+После того, как вы скачали файл `*.deb` для вашей версии Ubuntu, вы можете установить его следующим образом:
 ```bash
 sudo apt-get update
-sudo apt-get install -y ~/Downloads/leap*.deb
+sudo apt-get install -y ~/Downloads/coopos*.deb
 ```
-Your download path may vary. If you are in an Ubuntu docker container, omit `sudo` because you run as `root` by default.
+Ваш путь загрузки может отличаться. Если вы находитесь в Ubuntu docker контейнере, опустите `sudo`, поскольку вы работаете как `root` по умолчанию.
 
-Finally, verify Leap was installed correctly:
+Наконец, проверьте, что Coopos был установлен корректно:
 ```bash
 nodeos --full-version
 ```
-You should see a [semantic version](https://semver.org) string followed by a `git` commit hash with no errors. For example:
+Вы должны увидеть строку [семантической версии](https://semver.org), за которой следует git commit hash без ошибок. Например:
 ```
-v3.1.2-0b64f879e3ebe2e4df09d2e62f1fc164cc1125d1
+v5.1.0-abc123def456...
 ```
 
-## Build and Install from Source
-You can also build and install Leap from source.
+## Сборка и установка из исходного кода
+Вы также можете собрать и установить Coopos из исходного кода.
 
-### Prerequisites
-You will need to build on a [supported operating system](#supported-operating-systems).
+### Системные требования
 
-Requirements to build:
-- C++20 compiler and standard library
+#### Требования к сборке
+Для успешной сборки Coopos из исходного кода рекомендуется использовать систему с:
+- **Процессор**: минимум 4 ядра (рекомендуется 8 ядер)
+- **Оперативная память**: минимум 8 GB RAM (рекомендуется 16 GB)
+- **Дисковое пространство**: минимум 20 GB для сборки и тестов
+
+При меньших ресурсах сборка может быть невозможна или крайне медленной. Некоторые этапы компиляции требуют значительных ресурсов памяти.
+
+#### Требования к работе
+Для работы блокчейн-узла Coopos достаточно:
+- **Процессор**: минимум 2 ядра
+- **Оперативная память**: минимум 4 GB RAM
+- **Дисковое пространство**: зависит от высоты цепочки блоков. На текущий момент для основной сети кооперативной экономики требуется около 20 GB, поэтому минимально рекомендуется 40 GB, оптимально - 160 GB для комфортной работы и хранения истории.
+
+### Предварительные требования
+Вам нужно собирать на [поддерживаемой операционной системе](#supported-operating-systems).
+
+Требования для сборки:
+- Компилятор C++20 и стандартная библиотека
 - CMake 3.16+
-- LLVM 7 - 11 - for Linux only
-  - newer versions do not work
+- LLVM 7 - 11 - только для Linux
+  - более новые версии не работают
 - libcurl 7.40.0+
 - git
 - GMP
@@ -64,67 +165,67 @@ Requirements to build:
 - python3-numpy
 - zlib
 
-### Step 1 - Clone
-If you don't have the Leap repo cloned to your computer yet, [open a terminal](https://itsfoss.com/open-terminal-ubuntu) and navigate to the folder where you want to clone the Leap repository:
+### Шаг 1 - Клонирование
+Если у вас ещё не клонирован репозиторий Coopos, [откройте терминал](https://itsfoss.com/open-terminal-ubuntu) и перейдите в папку, где хотите клонировать репозиторий Coopos:
 ```bash
 cd ~/Downloads
 ```
-Clone Leap using either HTTPS...
+Клонируйте Coopos используя либо HTTPS...
 ```bash
 git clone --recursive https://github.com/AntelopeIO/leap.git
 ```
-...or SSH:
+...либо SSH:
 ```bash
 git clone --recursive git@github.com:AntelopeIO/leap.git
 ```
 
 > ℹ️ **HTTPS vs. SSH Clone** ℹ️  
-Both an HTTPS or SSH git clone will yield the same result - a folder named `leap` containing our source code. It doesn't matter which type you use.
+И HTTPS, и SSH клонирование дадут одинаковый результат - папку с именем `leap`, содержащую наш исходный код. Не важно, какой тип вы используете.
 
-Navigate into that folder:
+Перейдите в эту папку:
 ```bash
 cd leap
 ```
 
-### Step 2 - Checkout Release Tag or Branch
-Choose which [release](https://github.com/AntelopeIO/leap/releases) or [branch](#branches) you would like to build, then check it out. If you are not sure, use the [latest release](https://github.com/AntelopeIO/leap/releases/latest). For example, if you want to build release 3.1.2 then you would check it out using its tag, `v3.1.2`. In the example below, replace `v0.0.0` with your selected release tag accordingly:
+### Шаг 2 - Переключение на тег релиза или ветку
+Выберите, какой [релиз](https://github.com/AntelopeIO/leap/releases) или [ветку](#branches) вы хотите собрать, затем переключитесь на неё. Если вы не уверены, используйте [последний релиз](https://github.com/AntelopeIO/leap/releases/latest). Например, если вы хотите собрать релиз 5.1.0, то переключитесь на его тег `v5.1.0`. В примере ниже замените `v0.0.0` на выбранный вами тег релиза:
 ```bash
 git fetch --all --tags
-git checkout v0.0.0
+git checkout v5.1.0
 ```
 
-Once you are on the branch or release tag you want to build, make sure everything is up-to-date:
+После того, как вы находитесь на ветке или теге релиза, который хотите собрать, убедитесь, что всё обновлено:
 ```bash
 git pull
 git submodule update --init --recursive
 ```
 
-### Step 3 - Build
-Select build instructions below for a [pinned build](#pinned-build) (preferred) or an [unpinned build](#unpinned-build).
+### Шаг 3 - Сборка
+Выберите инструкции по сборке ниже для [закреплённой сборки](#pinned-build) (предпочтительно) или [незакреплённой сборки](#unpinned-build).
 
-> ℹ️ **Pinned vs. Unpinned Build** ℹ️  
-We have two types of builds for Leap: "pinned" and "unpinned." A pinned build is a reproducible build with the build environment and dependency versions fixed by the development team. In contrast, unpinned builds use the dependency versions provided by the build platform. Unpinned builds tend to be quicker because the pinned build environment must be built from scratch. Pinned builds, in addition to being reproducible, ensure the compiler remains the same between builds of different Leap major versions. Leap requires the compiler version to remain the same, otherwise its state might need to be recovered from a portable snapshot or the chain needs to be replayed.
+> ℹ️ **Закреплённая vs. Незакреплённая сборка** ℹ️
+У нас есть два типа сборок для Coopos: "закреплённая" и "незакреплённая". Закреплённая сборка - это воспроизводимая сборка с фиксированной средой сборки и версиями зависимостей, установленными командой разработчиков. В отличие от этого, незакреплённые сборки используют версии зависимостей, предоставляемые платформой сборки. Незакреплённые сборки обычно быстрее, потому что закреплённая среда сборки должна быть построена с нуля. Закреплённые сборки, помимо воспроизводимости, обеспечивают, чтобы компилятор оставался тем же между сборками разных основных версий Coopos. Coopos требует, чтобы версия компилятора оставалась той же, иначе его состояние может потребовать восстановления из портативного снимка или цепочка должна быть перезапущена.
 
-> ⚠️ **A Warning On Parallel Compilation Jobs (`-j` flag)** ⚠️  
-When building C/C++ software, often the build is performed in parallel via a command such as `make -j "$(nproc)"` which uses all available CPU threads. However, be aware that some compilation units (`*.cpp` files) in Leap will consume nearly 4GB of memory. Failures due to memory exhaustion will typically, but not always, manifest as compiler crashes. Using all available CPU threads may also prevent you from doing other things on your computer during compilation. For these reasons, consider reducing this value.
+> ⚠️ **Предупреждение о параллельных задачах компиляции (флаг `-j`)** ⚠️
+При сборке программного обеспечения C/C++, часто сборка выполняется параллельно с помощью команды типа `make -j "$(nproc)"`, которая использует все доступные потоки CPU. Однако учтите, что некоторые единицы компиляции (`*.cpp` файлы) в Coopos будут потреблять почти 4GB памяти. Сбои из-за исчерпания памяти обычно, но не всегда, проявляются как сбои компилятора. Использование всех доступных потоков CPU также может помешать вам делать другие вещи на вашем компьютере во время компиляции. По этим причинам рассмотрите возможность уменьшения этого значения.
 
-> 🐋 **Docker and `sudo`** 🐋  
-If you are in an Ubuntu docker container, omit `sudo` from all commands because you run as `root` by default. Most other docker containers also exclude `sudo`, especially Debian-family containers. If your shell prompt is a hash tag (`#`), omit `sudo`.
+> 🐋 **Docker и `sudo`** 🐋
+Если вы находитесь в Ubuntu docker контейнере, опустите `sudo` из всех команд, поскольку вы работаете как `root` по умолчанию. Большинство других docker контейнеров также исключают `sudo`, особенно Debian-семейные контейнеры. Если ваш промпт оболочки - хэш-тег (`#`), опустите `sudo`.
 
-#### Pinned Reproducible Build
-The pinned reproducible build requires Docker. Make sure you are in the root of the `leap` repo and then run
+#### Закреплённая воспроизводимая сборка
+Закреплённая воспроизводимая сборка требует Docker. Убедитесь, что вы находитесь в корне репозитория `leap`, затем выполните
 ```bash
 DOCKER_BUILDKIT=1 docker build -f tools/reproducible.Dockerfile -o . .
 ```
-This command will take a substantial amount of time because a toolchain is built from scratch. Upon completion, the current directory will contain a built `.deb` and `.tar.gz` (you can change the `-o .` argument to place the output in a different directory). If needing to reduce the number of parallel jobs as warned above, run the command as,
+Эта команда займёт существенное время, потому что цепочка инструментов собирается с нуля. После завершения текущая директория будет содержать собранные `.deb` и `.tar.gz` файлы (вы можете изменить аргумент `-o .` для размещения вывода в другой директории). Если нужно уменьшить количество параллельных задач, как предупреждалось выше, выполните команду как:
 ```bash
 DOCKER_BUILDKIT=1 docker build --build-arg LEAP_BUILD_JOBS=4 -f tools/reproducible.Dockerfile -o . .
 ```
 
-#### Unpinned Build
-The following instructions are valid for this branch. Other release branches may have different requirements, so ensure you follow the directions in the branch or release you intend to build. If you are in an Ubuntu docker container, omit `sudo` because you run as `root` by default.
+#### Незакреплённая сборка
+Следующие инструкции действительны для этой ветки. Другие ветки релизов могут иметь разные требования, поэтому убедитесь, что следуете указаниям в ветке или релизе, который собираетесь собирать. Если вы находитесь в Ubuntu docker контейнере, опустите `sudo`, поскольку вы работаете как `root` по умолчанию.
 
-Install dependencies:
+Установите зависимости:
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
@@ -139,89 +240,89 @@ sudo apt-get install -y \
         zlib1g-dev
 ```
 
-On Ubuntu 20.04, install gcc-10 which has C++20 support:
+На Ubuntu 20.04 установите gcc-10, который имеет поддержку C++20:
 ```bash
 sudo apt-get install -y g++-10
 ```
 
-To build, make sure you are in the root of the `leap` repo, then run the following command:
+Для сборки убедитесь, что вы находитесь в корне репозитория `leap`, затем выполните следующую команду:
 ```bash
 mkdir -p build
 cd build
 
-## on Ubuntu 20, specify the gcc-10 compiler
+## на Ubuntu 20 укажите компилятор gcc-10
 cmake -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10 -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-11 ..
 
-## on Ubuntu 22, the default gcc version is 11, using the default compiler is fine
+## на Ubuntu 22 версия gcc по умолчанию 11, использование компилятора по умолчанию нормально
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-11 ..
 
 make -j "$(nproc)" package
 ```
 
-Now you can optionally [test](#step-4---test) your build, or [install](#step-5---install) the `*.deb` binary packages, which will be in the root of your build directory.
+Теперь вы можете опционально [протестировать](#step-4---test) вашу сборку, или [установить](#step-5---install) бинарные пакеты `*.deb`, которые будут в корне вашей директории сборки.
 
-### Step 4 - Test
-Leap supports the following test suites:
+### Шаг 4 - Тестирование
+Coopos поддерживает следующие наборы тестов:
 
-Test Suite | Test Type | [Test Size](https://testing.googleblog.com/2010/12/test-sizes.html) | Notes
+Набор тестов | Тип теста | [Размер теста](https://testing.googleblog.com/2010/12/test-sizes.html) | Примечания
 ---|:---:|:---:|---
-[Parallelizable tests](#parallelizable-tests) | Unit tests | Small
-[WASM spec tests](#wasm-spec-tests) | Unit tests | Small | Unit tests for our WASM runtime, each short but _very_ CPU-intensive
-[Serial tests](#serial-tests) | Component/Integration | Medium
-[Long-running tests](#long-running-tests) | Integration | Medium-to-Large | Tests which take an extraordinarily long amount of time to run
+[Параллелизуемые тесты](#parallelizable-tests) | Модульные тесты | Маленький
+[WASM spec тесты](#wasm-spec-tests) | Модульные тесты | Маленький | Модульные тесты для нашего WASM runtime, каждый короткий но _очень_ CPU-интенсивный
+[Сериальные тесты](#serial-tests) | Компонент/Интеграция | Средний
+[Долго выполняемые тесты](#long-running-tests) | Интеграция | Средний-Крупный | Тесты, которые занимают чрезвычайно много времени на выполнение
 
-When building from source, we recommended running at least the [parallelizable tests](#parallelizable-tests).
+При сборке из исходного кода мы рекомендуем запускать как минимум [параллелизуемые тесты](#parallelizable-tests).
 
-#### Parallelizable Tests
-This test suite consists of any test that does not require shared resources, such as file descriptors, specific folders, or ports, and can therefore be run concurrently in different threads without side effects (hence, easily parallelized). These are mostly unit tests and [small tests](https://testing.googleblog.com/2010/12/test-sizes.html) which complete in a short amount of time.
+#### Параллелизуемые тесты
+Этот набор тестов состоит из любых тестов, которые не требуют разделяемых ресурсов, таких как файловые дескрипторы, специфические папки или порты, и поэтому могут выполняться параллельно в разных потоках без побочных эффектов (следовательно, легко параллелизуемы). Это в основном модульные тесты и [маленькие тесты](https://testing.googleblog.com/2010/12/test-sizes.html), которые завершаются за короткое время.
 
-You can invoke them by running `ctest` from a terminal in your Leap build directory and specifying the following arguments:
+Вы можете запустить их, выполнив `ctest` из терминала в вашей директории сборки Coopos и указав следующие аргументы:
 ```bash
 ctest -j "$(nproc)" -LE _tests
 ```
 
-#### WASM Spec Tests
-The WASM spec tests verify that our WASM execution engine is compliant with the web assembly standard. These are very [small](https://testing.googleblog.com/2010/12/test-sizes.html), very fast unit tests. However, there are over a thousand of them so the suite can take a little time to run. These tests are extremely CPU-intensive.
+#### WASM Spec тесты
+WASM spec тесты проверяют, что наш движок выполнения WASM соответствует стандарту web assembly. Это очень [маленькие](https://testing.googleblog.com/2010/12/test-sizes.html), очень быстрые модульные тесты. Однако их более тысячи, так что набор может занять немного времени на выполнение. Эти тесты чрезвычайно CPU-интенсивны.
 
-You can invoke them by running `ctest` from a terminal in your Leap build directory and specifying the following arguments:
+Вы можете запустить их, выполнив `ctest` из терминала в вашей директории сборки Coopos и указав следующие аргументы:
 ```bash
 ctest -j "$(nproc)" -L wasm_spec_tests
 ```
-We have observed severe performance issues when multiple virtual machines are running this test suite on the same physical host at the same time, for example in a CICD system. This can be resolved by disabling hyperthreading on the host.
+Мы наблюдали серьёзные проблемы с производительностью, когда несколько виртуальных машин запускают этот набор тестов на одном физическом хосте одновременно, например в системе CICD. Это можно решить, отключив hyperthreading на хосте.
 
-#### Serial Tests
-The serial test suite consists of [medium](https://testing.googleblog.com/2010/12/test-sizes.html) component or integration tests that use specific paths, ports, rely on process names, or similar, and cannot be run concurrently with other tests. Serial tests can be sensitive to other software running on the same host and they may `SIGKILL` other `nodeos` processes. These tests take a moderate amount of time to complete, but we recommend running them.
+#### Сериальные тесты
+Набор сериальных тестов состоит из [средних](https://testing.googleblog.com/2010/12/test-sizes.html) компонентных или интеграционных тестов, которые используют специфические пути, порты, полагаются на имена процессов или подобное, и не могут выполняться параллельно с другими тестами. Сериальные тесты могут быть чувствительны к другому программному обеспечению, работающему на том же хосте, и они могут отправлять `SIGKILL` другим процессам `nodeos`. Эти тесты занимают умеренное время на завершение, но мы рекомендуем их запускать.
 
-You can invoke them by running `ctest` from a terminal in your Leap build directory and specifying the following arguments:
+Вы можете запустить их, выполнив `ctest` из терминала в вашей директории сборки Coopos и указав следующие аргументы:
 ```bash
 ctest -L "nonparallelizable_tests"
 ```
 
-#### Long-Running Tests
-The long-running tests are [medium-to-large](https://testing.googleblog.com/2010/12/test-sizes.html) integration tests that rely on shared resources and take a very long time to run.
+#### Долго выполняемые тесты
+Долго выполняемые тесты - это [средние-крупные](https://testing.googleblog.com/2010/12/test-sizes.html) интеграционные тесты, которые полагаются на разделяемые ресурсы и занимают очень много времени на выполнение.
 
-You can invoke them by running `ctest` from a terminal in your Leap build directory and specifying the following arguments:
+Вы можете запустить их, выполнив `ctest` из терминала в вашей директории сборки Coopos и указав следующие аргументы:
 ```bash
 ctest -L "long_running_tests"
 ```
 
-### Step 5 - Install
-Once you have [built](#step-3---build-the-source-code) Leap and [tested](#step-4---test) your build, you can install Leap on your system. Don't forget to omit `sudo` if you are running in a docker container.
+### Шаг 5 - Установка
+После того, как вы [собрали](#step-3---build-the-source-code) Coopos и [протестировали](#step-4---test) вашу сборку, вы можете установить Coopos в вашу систему. Не забудьте опустить `sudo`, если вы работаете в docker контейнере.
 
-We recommend installing the binary package you just built. Navigate to your Leap build directory in a terminal and run this command:
+Мы рекомендуем установить бинарный пакет, который вы только что собрали. Перейдите в вашу директорию сборки Coopos в терминале и выполните эту команду:
 ```bash
 sudo apt-get update
 sudo apt-get install -y ./leap[-_][0-9]*.deb
 ```
 
-It is also possible to install using `make` instead:
+Также возможно установить используя `make`:
 ```bash
 sudo make install
 ```
 
-## Bash Autocomplete
-`cleos` and `leap-util` offer a substantial amount of functionality. Consider using bash's autocompletion support which makes it easier to discover all their various options.
+## Bash автодополнение
+`cleos` и `leap-util` предлагают существенный объём функциональности. Рассмотрите использование поддержки автодополнения bash, которая облегчает обнаружение всех их различных опций.
 
-For our provided `.deb` packages simply install Ubuntu's `bash-completion` package: `apt-get install bash-completion` (you may need to log out/in after installing).
+Для наших предоставленных `.deb` пакетов просто установите Ubuntu пакет `bash-completion`: `apt-get install bash-completion` (вам может понадобиться выйти и войти снова после установки).
 
-If building from source install the `build/programs/cleos/bash-completion/completions/cleos` and `build/programs/leap-util/bash-completion/completions/leap-util` files to your bash-completion directory. Refer to [bash-completion's documentation](https://github.com/scop/bash-completion#faq) on the possible install locations.
+Если собираете из исходного кода, установите файлы `build/programs/cleos/bash-completion/completions/cleos` и `build/programs/leap-util/bash-completion/completions/leap-util` в вашу директорию bash-completion. Обратитесь к [документации bash-completion](https://github.com/scop/bash-completion#faq) по возможным местам установки.
