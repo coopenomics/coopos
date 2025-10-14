@@ -2,6 +2,8 @@
 #include <eosio/chain/protocol_state_object.hpp>
 #include <eosio/chain/transaction_context.hpp>
 #include <eosio/chain/apply_context.hpp>
+#include <eosio/chain/authorization_manager.hpp>
+#include <eosio/chain/permission_object.hpp>
 #include <fc/io/datastream.hpp>
 #include <fc/crypto/modular_arithmetic.hpp>
 #include <fc/crypto/blake2.hpp>
@@ -88,6 +90,54 @@ namespace eosio::chain::webassembly {
          fc::raw::pack(out_ds, recovered);
          return out_ds.tellp();
       }
+   }
+
+   void interface::assert_recover_key_account( legacy_ptr<const fc::sha256> digest,
+                                               legacy_span<const char> sig,
+                                               legacy_span<const char> pub,
+                                               account_name account,
+                                               permission_name permission ) const {
+      fc::crypto::signature s;
+      fc::crypto::public_key p;
+      fc::datastream<const char*> ds( sig.data(), sig.size() );
+      fc::datastream<const char*> pubds ( pub.data(), pub.size() );
+
+      fc::raw::unpack( ds, s );
+      fc::raw::unpack( pubds, p );
+
+      EOS_ASSERT(s.which() < context.db.get<protocol_state_object>().num_supported_key_types, unactivated_signature_type,
+        "Unactivated signature type used during assert_recover_key_account");
+      EOS_ASSERT(p.which() < context.db.get<protocol_state_object>().num_supported_key_types, unactivated_key_type,
+        "Unactivated key type used when creating assert_recover_key_account");
+
+      if(context.control.is_speculative_block())
+         EOS_ASSERT(s.variable_size() <= context.control.configured_subjective_signature_length_limit(),
+                    sig_variable_size_limit_exception, "signature variable length component size greater than subjective maximum");
+
+      // First, verify that the signature recovers to the expected public key
+      auto recovered = fc::crypto::public_key( s, *digest, false );
+      EOS_ASSERT( recovered == p, crypto_api_exception, "Error expected key different than recovered key" );
+
+      // Now verify that this public key belongs to the specified account permission
+      const auto& auth_manager = context.control.get_authorization_manager();
+      const auto* perm = auth_manager.find_permission( permission_level{account, permission} );
+      
+      EOS_ASSERT( perm != nullptr, crypto_api_exception, 
+                  "Permission '${perm}' for account '${account}' does not exist",
+                  ("perm", permission)("account", account) );
+
+      // Check if the recovered public key is in the permission's authority
+      bool key_found = false;
+      for( const auto& key_weight : perm->auth.keys ) {
+         if( key_weight.key.to_public_key() == p ) {
+            key_found = true;
+            break;
+         }
+      }
+
+      EOS_ASSERT( key_found, crypto_api_exception, 
+                  "Public key does not belong to account '${account}' permission '${perm}'",
+                  ("account", account)("perm", permission) );
    }
 
    void interface::assert_sha256(legacy_span<const char> data, legacy_ptr<const fc::sha256> hash_val) const {

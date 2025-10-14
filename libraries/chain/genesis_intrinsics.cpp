@@ -119,6 +119,7 @@ const std::vector<const char*> genesis_intrinsics = {
    "db_end_i64",
    "assert_recover_key",
    "recover_key",
+   "assert_recover_key_account",
    "assert_sha256",
    "assert_sha1",
    "assert_sha512",

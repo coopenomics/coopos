@@ -142,6 +142,7 @@ inline constexpr auto get_intrinsic_table() {
       "env.db_idx256_previous",
       "env.assert_recover_key",
       "env.recover_key",
+      "env.assert_recover_key_account",
       "env.assert_sha256",
       "env.assert_sha1",
       "env.assert_sha512",

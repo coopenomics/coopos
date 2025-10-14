@@ -352,6 +352,19 @@ namespace webassembly {
          int32_t recover_key(legacy_ptr<const fc::sha256> digest, legacy_span<const char> sig, legacy_span<char> pub) const;
 
          /**
+          * Tests a signature against a hash and verifies the recovered public key matches the expected one
+          * and that this public key belongs to the specified account permission.
+          *
+          * @ingroup crypto
+          * @param digest - digest of the message that was signed.
+          * @param sig - signature.
+          * @param pub - expected public key.
+          * @param account - the account name to verify key ownership.
+          * @param permission - the permission name to check (e.g., active, owner).
+         */
+         void assert_recover_key_account(legacy_ptr<const fc::sha256> digest, legacy_span<const char> sig, legacy_span<const char> pub, account_name account, permission_name permission) const;
+
+         /**
           * Tests if the sha256 hash generated from data matches the provided digest.
           *
           * @ingroup crypto
