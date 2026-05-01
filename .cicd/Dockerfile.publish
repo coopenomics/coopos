@@ -75,6 +75,8 @@ ENV NEEDRESTART_MODE=a
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     make \
+    gcc \
+    g++ \
     python3 \
     python3-pip \
     ca-certificates \
@@ -83,15 +85,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2 \
     libllvm11 \
     libstdc++6 \
+    libz3-4 \
     zlib1g \
  && python3 -m pip install --no-cache-dir pygments \
  && rm -rf /var/lib/apt/lists/* /root/.cache
 
 COPY --from=builder /usr/local /usr/local
 
-# Совместимость с mono*/components/contracts/CMakeLists.txt,
-# который ссылается на /cdt/build/lib/cmake/cdt/CDTWasmToolchain.cmake
-RUN mkdir -p /cdt/build/lib/cmake \
- && ln -s /usr/local/lib/cmake/cdt /cdt/build/lib/cmake/cdt
+# Совместимость с mono*/components/contracts/CMakeLists.txt и с CDT
+# toolchain-файлом: CDTWasmToolchain.cmake жёстко прописывает пути
+# /cdt/build/bin/cdt-cc, /cdt/build/include, /cdt/build/lib и т.п.
+# Симлинк на установленный prefix /usr/local/cdt делает все эти пути
+# валидными внутри slim runtime.
+RUN ln -s /usr/local/cdt /cdt/build
 
 CMD ["/bin/bash"]
