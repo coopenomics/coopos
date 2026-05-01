@@ -97,6 +97,6 @@ COPY --from=builder /usr/local /usr/local
 # /cdt/build/bin/cdt-cc, /cdt/build/include, /cdt/build/lib и т.п.
 # Симлинк на установленный prefix /usr/local/cdt делает все эти пути
 # валидными внутри slim runtime.
-RUN ln -s /usr/local/cdt /cdt/build
+RUN mkdir -p /cdt && ln -s /usr/local/cdt /cdt/build
 
 CMD ["/bin/bash"]
