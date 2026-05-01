@@ -46,13 +46,25 @@ RUN python3 -m pip install --no-cache-dir pygments
 COPY --from=coopos . /blockchain
 COPY --from=cdt    . /cdt
 
-# Сборка blockchain (coopos)
+# Сборка blockchain (coopos). ENABLE_LEAP_DEV_DEB=ON активирует
+# component-based install (base + dev) и нужен для cpack -G DEB ниже,
+# чтобы получить два deb-пакета: coopos (runtime) и coopos-dev (headers,
+# libs, cmake-config — нужны для сборки контрактов и mono-тестов).
 RUN cd /blockchain \
  && rm -rf build \
  && mkdir build && cd build \
- && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-11 .. \
+ && cmake -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_PREFIX_PATH=/usr/lib/llvm-11 \
+          -DENABLE_LEAP_DEV_DEB=ON \
+          .. \
  && make -j"$(nproc)" \
- && make install
+ && make install \
+ && cpack -G DEB \
+ && /blockchain/tools/tweak-deb.sh /blockchain/build/coopos_*ubuntu*.deb \
+ && /blockchain/tools/tweak-deb.sh /blockchain/build/coopos-dev_*ubuntu*.deb \
+ && mkdir -p /out/deb \
+ && cp /blockchain/build/coopos_*.deb /blockchain/build/coopos-dev_*.deb /out/deb/ \
+ && ls -la /out/deb/
 
 # Сборка CDT
 RUN cd /cdt \
@@ -100,3 +112,12 @@ COPY --from=builder /usr/local /usr/local
 RUN mkdir -p /cdt && ln -s /usr/local/cdt /cdt/build
 
 CMD ["/bin/bash"]
+
+# ============================================================
+# Stage 3: deb — экспортирует только .deb файлы наружу
+# Используется в CI как `--target deb --output type=local,dest=./deb-out`,
+# чтобы выгрузить пакеты на runner для публикации в GitHub Release.
+# ============================================================
+FROM scratch AS deb
+COPY --from=builder /out/deb/ /
+

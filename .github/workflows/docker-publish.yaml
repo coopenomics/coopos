@@ -22,6 +22,9 @@ env:
   IMAGE_NAME: dicoop/blockchain
   CDT_REPO: coopenomics/cdt
 
+permissions:
+  contents: write    # нужен для публикации .deb в GitHub Release
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -104,7 +107,43 @@ jobs:
           cache-from: type=gha,scope=docker-publish
           cache-to: type=gha,mode=max,scope=docker-publish
 
+      - name: Extract .deb packages from builder
+        uses: docker/build-push-action@v6
+        with:
+          context: ./coopos
+          file: ./coopos/.cicd/Dockerfile.publish
+          target: deb
+          build-contexts: |
+            coopos=./coopos
+            cdt=./cdt
+          platforms: linux/amd64
+          outputs: type=local,dest=./deb-out
+          cache-from: type=gha,scope=docker-publish
+          cache-to: type=gha,mode=max,scope=docker-publish
+
+      - name: List extracted .deb files
+        run: ls -la ./deb-out/
+
+      - name: Publish .deb to GitHub Release (only on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.version }}
+          files: |
+            ./deb-out/coopos_*.deb
+            ./deb-out/coopos-dev_*.deb
+          fail_on_unmatched_files: true
+
+      - name: Upload .deb as workflow artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: coopos-deb-${{ steps.meta.outputs.version }}
+          path: ./deb-out/*.deb
+          retention-days: 30
+
       - name: Image summary
         run: |
           echo "Published: ${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
           echo "CDT ref: ${{ steps.cdtref.outputs.ref }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEB files extracted:" >> "$GITHUB_STEP_SUMMARY"
+          (cd deb-out && ls -la) >> "$GITHUB_STEP_SUMMARY"
