@@ -1,0 +1,20 @@
+# Применяется и к основному context, и к build-context coopos в CI.
+# Цель — не инвалидировать слой `COPY --from=coopos` при изменениях,
+# не относящихся к сборке blockchain (CI-конфиги, документация, etc.).
+
+# Build artefacts
+build
+*.log
+
+# CI/Docker meta — не читаются cmake, но Dockerfile.publish сам в .cicd
+.cicd
+.github
+.dockerignore
+
+# Documentation / images — не нужны для сборки
+docs
+tutorials
+images
+README.md
+CONTRIBUTING.md
+LICENSE
