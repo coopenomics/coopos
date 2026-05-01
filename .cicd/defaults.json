@@ -1,9 +1,0 @@
-{
-    "cdt":{
-       "target":"4",
-       "prerelease":false
-    },
-    "referencecontracts":{
-       "ref":"main"
-    }
- }
