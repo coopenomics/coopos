@@ -1,20 +1,19 @@
 # Применяется и к основному context, и к build-context coopos в CI.
 # Цель — не инвалидировать слой `COPY --from=coopos` при изменениях,
-# не относящихся к сборке blockchain (CI-конфиги, документация, etc.).
+# не относящихся к сборке blockchain (CI-конфиги).
+#
+# КОНСЕРВАТИВНО: исключаем только то, что точно не читается cmake
+# или сборкой. README/LICENSE/docs могут быть прочитаны через
+# configure_file()/install() — оставляем.
 
-# Build artefacts
 build
 *.log
 
-# CI/Docker meta — не читаются cmake, но Dockerfile.publish сам в .cicd
+# CI/Docker meta — не читаются cmake. Dockerfile.publish сам в .cicd,
+# но он подаётся buildkit-у через `file:`, не через context.
 .cicd
 .github
 .dockerignore
 
-# Documentation / images — не нужны для сборки
-docs
-tutorials
+# Только картинки и логотипы — точно не нужны
 images
-README.md
-CONTRIBUTING.md
-LICENSE
