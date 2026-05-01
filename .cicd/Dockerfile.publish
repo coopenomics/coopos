@@ -1,0 +1,97 @@
+# syntax=docker/dockerfile:1.7
+#
+# Multi-stage Dockerfile для публикации образа dicoop/blockchain.
+#
+# Сборка ожидает два build-context, передаваемых через docker buildx:
+#   --build-context coopos=<path-to-coopos-checkout>
+#   --build-context cdt=<path-to-cdt-checkout>
+#
+# Результат: тонкий runtime-образ, содержащий nodeos/cleos/keosd/leap-util,
+# trace_api_util и установленный CDT (cdt-cpp и компания) в /usr/local.
+# Сборочные артефакты, исходники и build-зависимости в финальный образ
+# не попадают.
+
+# ============================================================
+# Stage 1: builder — собирает blockchain (coopos) и CDT
+# ============================================================
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV NEEDRESTART_MODE=a
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    clang \
+    clang-tidy \
+    cmake \
+    git \
+    libcurl4-openssl-dev \
+    libgmp-dev \
+    llvm-11-dev \
+    libxml2-dev \
+    opam \
+    ocaml-interp \
+    python3 \
+    python3-pip \
+    time \
+    file \
+    zlib1g-dev \
+    g++-10 \
+    unzip \
+    ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir pygments
+
+COPY --from=coopos . /blockchain
+COPY --from=cdt    . /cdt
+
+# Сборка blockchain (coopos)
+RUN cd /blockchain \
+ && rm -rf build \
+ && mkdir build && cd build \
+ && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-11 .. \
+ && make -j"$(nproc)" \
+ && make install
+
+# Сборка CDT
+RUN cd /cdt \
+ && rm -rf build \
+ && mkdir build && cd build \
+ && cmake .. \
+ && make -j"$(nproc)" \
+ && make install
+
+# ============================================================
+# Stage 2: runtime — тонкий итоговый образ
+# ============================================================
+FROM ubuntu:22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV NEEDRESTART_MODE=a
+
+# Минимум для запуска nodeos/cleos/keosd и сборки контрактов
+# через cdt-cpp внутри контейнера (cmake + make используют mono*).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    make \
+    python3 \
+    python3-pip \
+    ca-certificates \
+    libcurl4 \
+    libgmp10 \
+    libxml2 \
+    libllvm11 \
+    libstdc++6 \
+    zlib1g \
+ && python3 -m pip install --no-cache-dir pygments \
+ && rm -rf /var/lib/apt/lists/* /root/.cache
+
+COPY --from=builder /usr/local /usr/local
+
+# Совместимость с mono*/components/contracts/CMakeLists.txt,
+# который ссылается на /cdt/build/lib/cmake/cdt/CDTWasmToolchain.cmake
+RUN mkdir -p /cdt/build/lib/cmake \
+ && ln -s /usr/local/lib/cmake/cdt /cdt/build/lib/cmake/cdt
+
+CMD ["/bin/bash"]
