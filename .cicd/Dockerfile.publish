@@ -58,7 +58,11 @@ RUN cd /blockchain \
           -DENABLE_LEAP_DEV_DEB=ON \
           .. \
  && make -j"$(nproc)" \
- && make install \
+ && make install
+
+# DEB-сборка вынесена в отдельный RUN, чтобы изменения в cpack/tweak
+# не инвалидировали тяжёлый build выше — он остаётся cache-hit.
+RUN cd /blockchain/build \
  && cpack -G DEB \
  && /blockchain/tools/tweak-deb.sh /blockchain/build/coopos_*ubuntu*.deb \
  && /blockchain/tools/tweak-deb.sh /blockchain/build/coopos-dev_*ubuntu*.deb \
