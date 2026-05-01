@@ -1,0 +1,110 @@
+name: Build & Publish Docker Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      cdt-ref:
+        description: 'CDT git ref (branch/tag/sha) for coopenomics/cdt'
+        required: false
+        default: 'v4.2.0'
+      version-tag:
+        description: 'Override docker image tag (default: git tag or short sha)'
+        required: false
+      push-latest:
+        description: 'Also push :latest'
+        type: boolean
+        default: true
+
+env:
+  IMAGE_NAME: dicoop/blockchain
+  CDT_REPO: coopenomics/cdt
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space on runner
+        run: |
+          sudo rm -rf /usr/share/dotnet \
+                      /usr/local/lib/android \
+                      /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost \
+                      "$AGENT_TOOLSDIRECTORY" \
+                      /opt/microsoft || true
+          docker image prune -af || true
+          df -h
+
+      - name: Checkout coopos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          path: coopos
+
+      - name: Determine CDT ref
+        id: cdtref
+        run: |
+          REF="${{ inputs.cdt-ref }}"
+          if [ -z "$REF" ]; then REF="v4.2.0"; fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout CDT (${{ steps.cdtref.outputs.ref }})
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CDT_REPO }}
+          ref: ${{ steps.cdtref.outputs.ref }}
+          submodules: recursive
+          fetch-depth: 0
+          path: cdt
+
+      - name: Compute image tags
+        id: meta
+        run: |
+          VERSION="${{ inputs.version-tag }}"
+          if [ -z "$VERSION" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              VERSION="${GITHUB_REF#refs/tags/}"
+            else
+              VERSION="${GITHUB_SHA::7}"
+            fi
+          fi
+          TAGS="${IMAGE_NAME}:${VERSION}"
+          if [[ "${{ inputs.push-latest }}" != "false" ]]; then
+            TAGS="${TAGS},${IMAGE_NAME}:latest"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Will publish: ${TAGS}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push (${{ steps.meta.outputs.version }})
+        uses: docker/build-push-action@v6
+        with:
+          context: ./coopos
+          file: ./coopos/.cicd/Dockerfile.publish
+          build-contexts: |
+            coopos=./coopos
+            cdt=./cdt
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image summary
+        run: |
+          echo "Published: ${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "CDT ref: ${{ steps.cdtref.outputs.ref }}" >> "$GITHUB_STEP_SUMMARY"
