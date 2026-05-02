@@ -60,12 +60,13 @@ RUN cd /blockchain \
  && make -j"$(nproc)" \
  && make install
 
-# DEB-сборка вынесена в отдельный RUN, чтобы изменения в cpack/tweak
+# DEB-сборка вынесена в отдельный RUN, чтобы изменения в cpack
 # не инвалидировали тяжёлый build выше — он остаётся cache-hit.
+# tools/tweak-deb.sh из leap-наследия не запускаем: он cosmetically
+# чистит libc deps в control file, но рассчитан на dpkg <22.04
+# (control.tar.gz vs новый control.tar.zst) и падает на новых cpack.
 RUN cd /blockchain/build \
  && cpack -G DEB \
- && /blockchain/tools/tweak-deb.sh /blockchain/build/coopos_*ubuntu*.deb \
- && /blockchain/tools/tweak-deb.sh /blockchain/build/coopos-dev_*ubuntu*.deb \
  && mkdir -p /out/deb \
  && cp /blockchain/build/coopos_*.deb /blockchain/build/coopos-dev_*.deb /out/deb/ \
  && ls -la /out/deb/
