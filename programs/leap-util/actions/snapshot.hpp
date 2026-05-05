@@ -14,5 +14,6 @@ public:
    void setup(CLI::App& app);
 
    // callbacks
-   int run_subcommand();
+   int run_to_json();
+   int run_from_json();
 };

@@ -23,16 +23,33 @@ void snapshot_actions::setup(CLI::App& app) {
    sub->require_subcommand();
    sub->fallthrough();
 
-   // subcommand -convert snapshot to json
-   auto to_json = sub->add_subcommand("to-json", "Convert snapshot file to json format");
-   to_json->add_option("--input-file,-i", opt->input_file, "Snapshot file to convert to json format, writes to <file>.json if output file not specified (tmp state dir used).")->required();
-   to_json->add_option("--output-file,-o", opt->output_file, "The file to write the output to (absolute or relative path).  If not specified then output is to <input-file>.json.");
+   // subcommand: convert binary snapshot to json
+   auto to_json = sub->add_subcommand("to-json", "Convert binary snapshot file to json format");
+   to_json->add_option("--input-file,-i", opt->input_file, "Snapshot file (binary) to convert. Writes to <input>.json if --output-file not specified.")->required();
+   to_json->add_option("--output-file,-o", opt->output_file, "The file to write the output to (absolute or relative path). If not specified then output is to <input-file>.json.");
    to_json->add_option("--chain-id", opt->chain_id, "Specify a chain id in case it is not included in a snapshot or you want to override it.");
    to_json->add_option("--db-size", opt->db_size, "Maximum size (in MiB) of the chain state database")->capture_default_str();
 
    to_json->callback([this]() {
       try {
-         int rc = run_subcommand();
+         int rc = run_to_json();
+         if(rc) throw(CLI::RuntimeError(rc));
+      } catch(...) {
+         print_exception();
+         throw(CLI::RuntimeError(-1));
+      }
+   });
+
+   // subcommand: convert json snapshot back to binary
+   auto from_json = sub->add_subcommand("from-json", "Convert json snapshot file back to binary format");
+   from_json->add_option("--input-file,-i", opt->input_file, "Snapshot file (json) to convert. Writes to <input>.bin if --output-file not specified.")->required();
+   from_json->add_option("--output-file,-o", opt->output_file, "The file to write the binary snapshot to. If not specified then output is to <input-file>.bin.");
+   from_json->add_option("--chain-id", opt->chain_id, "Specify a chain id in case it is not included in a snapshot or you want to override it.");
+   from_json->add_option("--db-size", opt->db_size, "Maximum size (in MiB) of the chain state database")->capture_default_str();
+
+   from_json->callback([this]() {
+      try {
+         int rc = run_from_json();
          if(rc) throw(CLI::RuntimeError(rc));
       } catch(...) {
          print_exception();
@@ -41,7 +58,7 @@ void snapshot_actions::setup(CLI::App& app) {
    });
 }
 
-int snapshot_actions::run_subcommand() {
+int snapshot_actions::run_to_json() {
    if(!opt->input_file.empty()) {
       if(!std::filesystem::exists(opt->input_file)) {
          std::cerr << "cannot load snapshot, " << opt->input_file
@@ -109,5 +126,68 @@ int snapshot_actions::run_subcommand() {
    }
 
    ilog("Completed writing snapshot: ${s}", ("s", json_path));
+   return 0;
+}
+
+int snapshot_actions::run_from_json() {
+   if(!std::filesystem::exists(opt->input_file)) {
+      std::cerr << "cannot load json snapshot, " << opt->input_file
+                << " does not exist" << std::endl;
+      return -1;
+   }
+
+   std::filesystem::path snapshot_path = opt->input_file;
+   std::filesystem::path bin_path = opt->output_file.empty()
+                               ? snapshot_path.generic_string() + ".bin"
+                               : opt->output_file;
+   // determine chain id
+   auto chain_id = chain_id_type("");
+   if(!opt->chain_id.empty()) { // override it
+      chain_id = chain_id_type(opt->chain_id);
+   }
+   else { // try to retrieve it
+      istream_json_snapshot_reader reader(snapshot_path);
+      reader.validate();
+      chain_id = controller::extract_chain_id(reader);
+   }
+
+   // setup controller backed by temp dir, replay json snapshot, dump as binary
+   fc::temp_directory dir;
+   const auto& temp_dir = dir.path();
+   std::filesystem::path state_dir = temp_dir / "state";
+   std::filesystem::path blocks_dir = temp_dir / "blocks";
+   std::unique_ptr<controller> control;
+   controller::config cfg;
+   cfg.blocks_dir = blocks_dir;
+   cfg.state_dir = state_dir;
+   cfg.state_size = opt->db_size * 1024 * 1024;
+   cfg.state_guard_size = opt->guard_size * 1024 * 1024;
+   cfg.eosvmoc_tierup = wasm_interface::vm_oc_enable::oc_none;
+   protocol_feature_set pfs = initialize_protocol_features( std::filesystem::path("protocol_features"), false );
+
+   try {
+      auto reader = std::make_shared<istream_json_snapshot_reader>(snapshot_path);
+
+      auto check_shutdown = []() { return false; };
+      auto shutdown = []() { throw; };
+
+      control.reset(new controller(cfg, std::move(pfs), chain_id));
+      control->add_indices();
+      control->startup(shutdown, check_shutdown, reader);
+
+      ilog("Writing binary snapshot: ${s}", ("s", bin_path));
+      auto snap_out = std::ofstream(bin_path.generic_string(), (std::ios::out | std::ios::binary));
+      auto writer = std::make_shared<ostream_snapshot_writer>(snap_out);
+      control->write_snapshot(writer);
+      writer->finalize();
+      snap_out.flush();
+      snap_out.close();
+   } catch(const database_guard_exception& e) {
+      std::cerr << "Database is not configured to have enough storage to handle provided snapshot, please increase storage and try again" << std::endl;
+      control.reset();
+      throw;
+   }
+
+   ilog("Completed writing binary snapshot: ${s}", ("s", bin_path));
    return 0;
 }
