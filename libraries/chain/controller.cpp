@@ -3870,6 +3870,17 @@ void controller_impl::on_activation<builtin_protocol_feature_t::bls_primitives>(
 }
 
 template<>
+void controller_impl::on_activation<builtin_protocol_feature_t::assert_recover_key_account>() {
+   db.modify( db.get<protocol_state_object>(), [&]( auto& ps ) {
+      // idempotent: на свежем genesis intrinsic уже в whitelist через genesis_intrinsics,
+      // на существующих цепочках добавляем здесь при активации фичи.
+      if( !is_intrinsic_whitelisted( ps.whitelisted_intrinsics, "assert_recover_key_account" ) ) {
+         add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "assert_recover_key_account" );
+      }
+   } );
+}
+
+template<>
 void controller_impl::on_activation<builtin_protocol_feature_t::disable_deferred_trxs_stage_2>() {
    const auto& idx = db.get_index<generated_transaction_multi_index, by_trx_id>();
    // remove all deferred trxs and refund their payers

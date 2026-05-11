@@ -308,6 +308,20 @@ retires a deferred transaction is invalid.
 */
             {builtin_protocol_feature_t::disable_deferred_trxs_stage_1}
          } )
+         (  builtin_protocol_feature_t::assert_recover_key_account, builtin_protocol_feature_spec{
+            "ASSERT_RECOVER_KEY_ACCOUNT",
+            fc::variant("2ad6b7aabba8edbc87b46f3340df4d0db0e4b65474db3e1cd5db33fb685a506b").as<digest_type>(),
+            // SHA256 hash of the raw message below within the comment delimiters (do not modify message below).
+/*
+Builtin protocol feature: ASSERT_RECOVER_KEY_ACCOUNT
+
+Adds new cryptographic host function assert_recover_key_account which verifies
+that a signature over a given digest was produced by a key currently bound to
+a specific permission of an account on chain. Allows smart contracts to verify
+signatures against on-chain account authorities, not only raw public keys.
+*/
+            {}
+         } )
    ;
 
 
