@@ -347,6 +347,7 @@ struct controller_impl {
       set_activation_handler<builtin_protocol_feature_t::crypto_primitives>();
       set_activation_handler<builtin_protocol_feature_t::bls_primitives>();
       set_activation_handler<builtin_protocol_feature_t::disable_deferred_trxs_stage_2>();
+      set_activation_handler<builtin_protocol_feature_t::assert_recover_key_account>();
 
       self.irreversible_block.connect([this](const block_signal_params& t) {
          const auto& [ block, id] = t;
