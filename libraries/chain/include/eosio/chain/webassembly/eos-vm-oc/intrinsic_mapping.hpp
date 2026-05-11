@@ -142,7 +142,6 @@ inline constexpr auto get_intrinsic_table() {
       "env.db_idx256_previous",
       "env.assert_recover_key",
       "env.recover_key",
-      "env.assert_recover_key_account",
       "env.assert_sha256",
       "env.assert_sha1",
       "env.assert_sha512",
@@ -279,7 +278,8 @@ inline constexpr auto get_intrinsic_table() {
       "env.bls_g2_map",
       "env.bls_fp_mod",
       "env.bls_fp_mul",
-      "env.bls_fp_exp"
+      "env.bls_fp_exp",
+      "env.assert_recover_key_account"
    );
 }
 inline constexpr std::size_t find_intrinsic_index(std::string_view hf) {

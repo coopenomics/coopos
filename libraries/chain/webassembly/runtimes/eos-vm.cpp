@@ -433,7 +433,6 @@ REGISTER_LEGACY_HOST_FUNCTION(get_active_producers);
 // crypto api
 REGISTER_LEGACY_CF_HOST_FUNCTION(assert_recover_key);
 REGISTER_LEGACY_CF_HOST_FUNCTION(recover_key);
-REGISTER_LEGACY_CF_HOST_FUNCTION(assert_recover_key_account);
 REGISTER_LEGACY_CF_HOST_FUNCTION(assert_sha256);
 REGISTER_LEGACY_CF_HOST_FUNCTION(assert_sha1);
 REGISTER_LEGACY_CF_HOST_FUNCTION(assert_sha512);
@@ -649,7 +648,8 @@ REGISTER_CF_HOST_FUNCTION( bls_g1_map );
 REGISTER_CF_HOST_FUNCTION( bls_g2_map );
 REGISTER_CF_HOST_FUNCTION( bls_fp_mod );
 REGISTER_CF_HOST_FUNCTION( bls_fp_mul );
-REGISTER_CF_HOST_FUNCTION( bls_fp_exp ); 
+REGISTER_CF_HOST_FUNCTION( bls_fp_exp );
+REGISTER_LEGACY_CF_HOST_FUNCTION(assert_recover_key_account);
 
 } // namespace webassembly
 } // namespace chain
