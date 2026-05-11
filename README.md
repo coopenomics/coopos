@@ -7,8 +7,9 @@
 2. [Быстрый старт с Docker](#docker-quick-start)
 3. [Поддерживаемые операционные системы](#supported-operating-systems)
 4. [Бинарная установка](#binary-installation)
-5. [Сборка и установка из исходного кода](#build-and-install-from-source)
-6. [Bash автодополнение](#bash-autocomplete)
+5. [Запуск ноды на основной сети](#join-mainnet)
+6. [Сборка и установка из исходного кода](#build-and-install-from-source)
+7. [Bash автодополнение](#bash-autocomplete)
 
 Coopos - это C++ реализация протокола [Antelope](https://github.com/AntelopeIO) с расширениями для кооперативной экономики. Содержит программное обеспечение блокчейн-узла и вспомогательные инструменты для разработчиков и операторов узлов.
 
@@ -130,6 +131,108 @@ nodeos --full-version
 ```
 v5.1.0-abc123def456...
 ```
+
+<a id="join-mainnet"></a>
+## Запуск ноды на основной сети Кооперативной Экономики
+
+Чтобы свежая нода смогла подключиться к основной сети, ей нужно вычислить тот же `chain_id`, что у работающих пиров. `chain_id` — детерминированный хеш от стартовых параметров (`initial_timestamp`, `initial_key`, `initial_configuration`); при расхождении хотя бы одного бита пир отвечает `go_away_message reason=wrong chain` и закрывает соединение.
+
+Дефолтное значение `EOSIO_ROOT_KEY` в этой сборке не равно тому, с которым была инициирована основная сеть, поэтому при запуске на пустой `data-dir` нужно явно подать `genesis.json` с правильным `initial_key`.
+
+### Genesis основной сети
+
+Сохраните содержимое ниже в файл `genesis.json` (например, в `~/blockchain/config/genesis.json`):
+
+```json
+{
+  "initial_timestamp": "2024-07-01T10:00:00.000",
+  "initial_key": "EOS7TjqL5YfQ7tKzzKr3i1Pa1JkTVrcY2BJhMFfyMPajfAiPThjH7",
+  "initial_configuration": {
+    "max_block_net_usage": 1048576,
+    "target_block_net_usage_pct": 1000,
+    "max_transaction_net_usage": 1048575,
+    "base_per_transaction_net_usage": 12,
+    "net_usage_leeway": 500,
+    "context_free_discount_net_usage_num": 20,
+    "context_free_discount_net_usage_den": 100,
+    "max_block_cpu_usage": 200000,
+    "target_block_cpu_usage_pct": 500,
+    "max_transaction_cpu_usage": 180000,
+    "min_transaction_cpu_usage": 100,
+    "max_transaction_lifetime": 3600,
+    "deferred_trx_expiration_window": 600,
+    "max_transaction_delay": 3888000,
+    "max_inline_action_size": 4096,
+    "max_inline_action_depth": 4,
+    "max_authority_depth": 6
+  },
+  "initial_chain_id": "0000000000000000000000000000000000000000000000000000000000000000"
+}
+```
+
+Ожидаемый `chain_id` основной сети: `6e37f9ac0f0ea717bfdbf57d1dd5d7f0e2d773227d9659a63bbf86eec0326c1b`.
+
+### Первый запуск с genesis (полный ресинк с блока 1)
+
+`--genesis-json` принимается nodeos **только если `data-dir` пуст** (отсутствуют каталоги `state`, `blocks`, `state-history`, `snapshots`). Поэтому при первом запуске или при намеренном пересинке:
+
+```bash
+sudo systemctl stop nodeos
+
+# Полная очистка состояния (история и trace будут переслушаны с пира)
+sudo rm -rf ~/blockchain/data/blocks \
+            ~/blockchain/data/state \
+            ~/blockchain/data/state-history \
+            ~/blockchain/data/snapshots
+
+# Подложить genesis (один раз, путь произвольный — главное чтобы совпадал с флагом ниже)
+sudo install -m 644 genesis.json ~/blockchain/config/genesis.json
+
+# Подсунуть флаг --genesis-json в systemd unit на один запуск
+sudo sed -i 's|^\(ExecStart=/usr/local/bin/nodeos.*\)$|\1 --genesis-json /root/blockchain/config/genesis.json|' \
+     /etc/systemd/system/nodeos.service
+sudo systemctl daemon-reload
+sudo systemctl start nodeos
+
+# Удостовериться, что нода ловит блоки от пира — не должно быть "wrong chain"/"go_away"
+sudo journalctl -u nodeos -f --since '30 seconds ago'
+
+# Когда увидели "Received block ...", снять флаг из unit, чтобы он не мешал последующим рестартам
+sudo sed -i 's| --genesis-json /root/blockchain/config/genesis.json||' /etc/systemd/system/nodeos.service
+sudo systemctl daemon-reload
+```
+
+При повторных рестартах флаг `--genesis-json` не нужен: nodeos продолжит работу из существующего `state`, дефолтное значение `EOSIO_ROOT_KEY` из бинарника при этом не используется.
+
+### Быстрый старт со снапшота вместо полного ресинка
+
+Полный ресинк восстанавливает всю историю блоков с блока 1 и занимает часы. Если история до текущего состояния не нужна, можно стартовать со снапшота — нода поднимется за минуты, а историю с момента снапшота и далее догонит по p2p:
+
+```bash
+sudo systemctl stop nodeos
+
+# Получить снапшот от любой ноды, на которой включён producer_api_plugin:
+#   curl -X POST http://<peer>:8888/v1/producer/create_snapshot
+# Файл будет в /<data-dir>/snapshots/snapshot-<head_block_id>.bin — забрать
+# его и положить как /root/blockchain/snapshot.bin на целевой ноде.
+
+sudo rm -rf ~/blockchain/data/blocks \
+            ~/blockchain/data/state \
+            ~/blockchain/data/state-history \
+            ~/blockchain/data/snapshots
+
+sudo sed -i 's|^\(ExecStart=/usr/local/bin/nodeos.*\)$|\1 --snapshot /root/blockchain/snapshot.bin|' \
+     /etc/systemd/system/nodeos.service
+sudo systemctl daemon-reload
+sudo systemctl start nodeos
+sudo journalctl -u nodeos -f --since '30 seconds ago'
+
+# После старта снять флаг
+sudo sed -i 's| --snapshot /root/blockchain/snapshot.bin||' /etc/systemd/system/nodeos.service
+sudo systemctl daemon-reload
+```
+
+Снапшот несёт в себе `chain_id`, поэтому `--genesis-json` в этом сценарии не нужен.
 
 ## Сборка и установка из исходного кода
 Вы также можете собрать и установить Coopos из исходного кода.
