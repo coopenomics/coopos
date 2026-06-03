@@ -269,6 +269,11 @@ void chain_plugin::set_program_options(options_description& cli, options_descrip
           "the location of the state directory (absolute path or relative to application data dir)")
          ("protocol-features-dir", bpo::value<std::filesystem::path>()->default_value("protocol_features"),
           "the location of the protocol_features directory (absolute path or relative to application config dir)")
+         ("chain-historical-exceptions", bpo::value<std::filesystem::path>(),
+          "Path to a JSON file declaring historical validation exceptions for this chain "
+          "(absolute, or relative to application config dir). The file must specify a chain_id "
+          "matching this node's chain — otherwise nodeos refuses to start. Absent / empty path "
+          "preserves strict upstream Antelope validation behaviour. See coopos/exception-notes.md.")
          ("checkpoint", bpo::value<vector<string>>()->composing(), "Pairs of [BLOCK_NUM,BLOCK_ID] that should be enforced as checkpoints.")
          ("wasm-runtime", bpo::value<eosio::chain::wasm_interface::vm_type>()->value_name("runtime")->notifier([](const auto& vm){
 #ifndef EOSIO_EOS_VM_OC_DEVELOPER
@@ -566,6 +571,12 @@ void chain_plugin_impl::plugin_initialize(const variables_map& options) {
             protocol_features_dir = pfd;
 
          pfs = initialize_protocol_features( protocol_features_dir );
+      }
+
+      if( options.count( "chain-historical-exceptions" ) ) {
+         auto p = options.at( "chain-historical-exceptions" ).as<std::filesystem::path>();
+         chain_config->chain_historical_exceptions_path =
+            p.is_relative() ? app().config_dir() / p : p;
       }
 
       if( options.count("checkpoint") ) {
