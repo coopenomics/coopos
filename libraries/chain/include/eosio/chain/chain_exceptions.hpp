@@ -26,6 +26,12 @@ struct historical_action_mroot_window {
  * file => strict upstream validation, no bypass.
  */
 struct chain_historical_exceptions {
+   // chain_id_type's default ctor is private upstream; provide an explicit
+   // default ctor that uses its public empty_chain_id() factory so this
+   // struct is default-constructible (required by fc::variant::as<T>()).
+   chain_historical_exceptions()
+      : chain_id( chain_id_type::empty_chain_id() ) {}
+
    chain_id_type                                chain_id;
    std::vector<historical_action_mroot_window>  action_mroot_zero_windows;
 };
