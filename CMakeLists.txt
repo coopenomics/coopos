@@ -14,7 +14,7 @@ set( CMAKE_CXX_EXTENSIONS ON )
 set( CXX_STANDARD_REQUIRED ON)
 
 set(VERSION_MAJOR 5)
-set(VERSION_MINOR 2)
+set(VERSION_MINOR 3)
 set(VERSION_PATCH 0)
 set(VERSION_SUFFIX "" CACHE STRING "Optional pre-release suffix appended to version (e.g. rc1, beta). Empty = clean release.")
 
