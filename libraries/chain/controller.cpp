@@ -26,6 +26,7 @@
 #include <eosio/chain/thread_utils.hpp>
 #include <eosio/chain/platform_timer.hpp>
 #include <eosio/chain/deep_mind.hpp>
+#include <eosio/chain/chain_exceptions.hpp>
 
 #include <chainbase/chainbase.hpp>
 #include <eosio/vm/allocator.hpp>
@@ -245,6 +246,7 @@ struct controller_impl {
    protocol_feature_manager        protocol_features;
    controller::config              conf;
    const chain_id_type             chain_id; // read by thread_pool threads, value will not be changed
+   chain_historical_exceptions     historical_exceptions; // empty unless loaded by load_historical_exceptions()
    bool                            replaying = false;
    bool                            is_producer_node = false; // true if node is configured as a block producer
    db_read_mode                    read_mode = db_read_mode::HEAD;
@@ -689,6 +691,44 @@ struct controller_impl {
    }
 
 
+   /**
+    * Load the per-chain historical exceptions file (if configured) and verify
+    * its `chain_id` matches the chain this controller was constructed for.
+    *
+    * Empty/absent path => no exceptions loaded => strict upstream validation.
+    * chain_id mismatch => fatal error on startup; we refuse to run with
+    * exceptions intended for a different chain.
+    */
+   void load_historical_exceptions() {
+      const auto& p = conf.chain_historical_exceptions_path;
+      if( p.empty() ) return;
+      if( !std::filesystem::exists( p ) ) {
+         wlog( "chain-historical-exceptions path ${p} does not exist; running in strict mode",
+               ("p", p.string()) );
+         return;
+      }
+
+      chain_historical_exceptions ex;
+      try {
+         ex = fc::json::from_file( p ).as<chain_historical_exceptions>();
+      } catch( const fc::exception& e ) {
+         elog( "failed to parse chain-historical-exceptions file ${p}: ${err}",
+               ("p", p.string())("err", e.to_detail_string()) );
+         throw;
+      }
+
+      EOS_ASSERT( ex.chain_id == chain_id, chain_id_type_exception,
+                  "chain-historical-exceptions chain_id (${ex}) does not match running chain (${rc})",
+                  ("ex", ex.chain_id)("rc", chain_id) );
+
+      historical_exceptions = std::move( ex );
+
+      for( const auto& w : historical_exceptions.action_mroot_zero_windows ) {
+         wlog( "loaded historical action_mroot=0 exception window [${a}..${b}]: ${r}",
+               ("a", w.from_block)("b", w.to_block)("r", w.reason) );
+      }
+   }
+
    static auto validate_db_version( const chainbase::database& db ) {
       // check database version
       const auto& header_idx = db.get_index<database_header_multi_index>().indices().get<by_id>();
@@ -735,6 +775,8 @@ struct controller_impl {
       }
 
       protocol_features.init( db );
+
+      load_historical_exceptions();
 
       // At startup, no transaction specific logging is possible
       if (auto dm_logger = get_deep_mind_logger(false)) {
@@ -2060,6 +2102,25 @@ struct controller_impl {
 #undef EOS_REPORT
    }
 
+   /**
+    * True iff every header field except `action_mroot` matches between the
+    * producer block and the locally re-assembled block. Used to gate the
+    * historical action_mroot=0 exception bypass: bypass is allowed only when
+    * the sole mismatch is the (known-zero) action_mroot — any other field
+    * divergence must still fail validation as usual.
+    */
+   static bool other_header_fields_match( const block_header& b,
+                                          const block_header& ab ) {
+      return b.timestamp         == ab.timestamp
+          && b.producer          == ab.producer
+          && b.confirmed         == ab.confirmed
+          && b.previous          == ab.previous
+          && b.transaction_mroot == ab.transaction_mroot
+          && b.schedule_version  == ab.schedule_version
+          && b.new_producers     == ab.new_producers
+          && b.header_extensions == ab.header_extensions;
+   }
+
 
    void apply_block( controller::block_report& br, const block_state_legacy_ptr& bsp, controller::block_status s,
                      const trx_meta_cache_lookup& trx_lookup )
@@ -2151,11 +2212,28 @@ struct controller_impl {
          auto& ab = std::get<assembled_block>(pending->_block_stage);
 
          if( producer_block_id != ab._id ) {
-            elog( "Validation block id does not match producer block id" );
-            report_block_header_diff( *b, *ab._unsigned_block );
-            // this implicitly asserts that all header fields (less the signature) are identical
-            EOS_ASSERT( producer_block_id == ab._id, block_validate_exception, "Block ID does not match",
-                        ("producer_block_id", producer_block_id)("validator_block_id", ab._id) );
+            bool historical_bypass = false;
+            if( !historical_exceptions.action_mroot_zero_windows.empty()
+                && b->action_mroot == digest_type() )
+            {
+               const uint32_t bn = b->block_num();
+               for( const auto& w : historical_exceptions.action_mroot_zero_windows ) {
+                  if( bn < w.from_block || bn > w.to_block ) continue;
+                  if( !other_header_fields_match( *b, *ab._unsigned_block ) ) continue;
+                  wlog( "historical action_mroot=0 exception applied for block ${bn} in window [${a}..${c}]: ${r}",
+                        ("bn", bn)("a", w.from_block)("c", w.to_block)("r", w.reason) );
+                  historical_bypass = true;
+                  break;
+               }
+            }
+
+            if( !historical_bypass ) {
+               elog( "Validation block id does not match producer block id" );
+               report_block_header_diff( *b, *ab._unsigned_block );
+               // this implicitly asserts that all header fields (less the signature) are identical
+               EOS_ASSERT( producer_block_id == ab._id, block_validate_exception, "Block ID does not match",
+                           ("producer_block_id", producer_block_id)("validator_block_id", ab._id) );
+            }
          }
 
          if( !use_bsp_cached ) {

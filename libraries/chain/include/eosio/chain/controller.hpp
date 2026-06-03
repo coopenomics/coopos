@@ -72,6 +72,7 @@ namespace eosio { namespace chain {
             path                     blocks_dir             =  chain::config::default_blocks_dir_name;
             block_log_config         blog;
             path                     state_dir              =  chain::config::default_state_dir_name;
+            path                     chain_historical_exceptions_path; // empty => strict upstream validation
             uint64_t                 state_size             =  chain::config::default_state_size;
             uint64_t                 state_guard_size       =  chain::config::default_state_guard_size;
             uint32_t                 sig_cpu_bill_pct       =  chain::config::default_sig_cpu_bill_pct;
