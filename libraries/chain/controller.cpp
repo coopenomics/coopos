@@ -701,32 +701,69 @@ struct controller_impl {
     */
    void load_historical_exceptions() {
       const auto& p = conf.chain_historical_exceptions_path;
-      if( p.empty() ) return;
-      if( !std::filesystem::exists( p ) ) {
-         wlog( "chain-historical-exceptions path ${p} does not exist; running in strict mode",
-               ("p", p.string()) );
-         return;
-      }
-
       chain_historical_exceptions ex;
-      try {
-         ex = fc::json::from_file( p ).as<chain_historical_exceptions>();
-      } catch( const fc::exception& e ) {
-         elog( "failed to parse chain-historical-exceptions file ${p}: ${err}",
-               ("p", p.string())("err", e.to_detail_string()) );
-         throw;
+      bool from_file = false;
+
+      if( !p.empty() ) {
+         if( !std::filesystem::exists( p ) ) {
+            wlog( "chain-historical-exceptions path ${p} does not exist; falling back to compiled-in registry",
+                  ("p", p.string()) );
+         } else {
+            try {
+               ex = fc::json::from_file( p ).as<chain_historical_exceptions>();
+            } catch( const fc::exception& e ) {
+               elog( "failed to parse chain-historical-exceptions file ${p}: ${err}",
+                     ("p", p.string())("err", e.to_detail_string()) );
+               throw;
+            }
+            EOS_ASSERT( ex.chain_id == chain_id, chain_id_type_exception,
+                        "chain-historical-exceptions chain_id (${ex}) does not match running chain (${rc})",
+                        ("ex", ex.chain_id)("rc", chain_id) );
+            from_file = true;
+            ilog( "loaded chain historical exceptions from file ${p}", ("p", p.string()) );
+         }
       }
 
-      EOS_ASSERT( ex.chain_id == chain_id, chain_id_type_exception,
-                  "chain-historical-exceptions chain_id (${ex}) does not match running chain (${rc})",
-                  ("ex", ex.chain_id)("rc", chain_id) );
+      if( !from_file ) {
+         // Builtin fallback: match by chain_id.
+         for( const auto& b : get_builtin_historical_exceptions() ) {
+            if( b.chain_id == chain_id ) {
+               ex = b;
+               ilog( "applying compiled-in chain historical exceptions for chain ${cid}",
+                     ("cid", chain_id) );
+               break;
+            }
+         }
+      }
 
       historical_exceptions = std::move( ex );
 
       for( const auto& w : historical_exceptions.action_mroot_zero_windows ) {
-         wlog( "loaded historical action_mroot=0 exception window [${a}..${b}]: ${r}",
+         wlog( "historical action_mroot bypass window [${a}..${b}]: ${r}",
                ("a", w.from_block)("b", w.to_block)("r", w.reason) );
       }
+      for( const auto& w : historical_exceptions.onblock_skip_windows ) {
+         wlog( "historical onblock skip window [${a}..${b}]: ${r}",
+               ("a", w.from_block)("b", w.to_block)("r", w.reason) );
+      }
+      for( const auto& s : historical_exceptions.suppressed_activations ) {
+         wlog( "historical on_activation suppression for feature ${d}: ${r}",
+               ("d", s.feature_digest)("r", s.reason) );
+      }
+   }
+
+   bool is_onblock_skipped_for_block( uint32_t block_num ) const {
+      for( const auto& w : historical_exceptions.onblock_skip_windows ) {
+         if( block_num >= w.from_block && block_num <= w.to_block ) return true;
+      }
+      return false;
+   }
+
+   const historical_suppressed_activation* find_suppressed_activation( const digest_type& d ) const {
+      for( const auto& s : historical_exceptions.suppressed_activations ) {
+         if( s.feature_digest == d ) return &s;
+      }
+      return nullptr;
    }
 
    static auto validate_db_version( const chainbase::database& db ) {
@@ -1815,7 +1852,12 @@ struct controller_impl {
                }
 
                if( f.builtin_feature ) {
-                  trigger_activation_handler( *f.builtin_feature );
+                  if( const auto* suppress = find_suppressed_activation( feature_digest ) ) {
+                     wlog( "historical exception: suppressing on_activation handler for feature ${d} at block ${bn}: ${r}",
+                           ("d", feature_digest)("bn", pbhs.block_num)("r", suppress->reason) );
+                  } else {
+                     trigger_activation_handler( *f.builtin_feature );
+                  }
                }
 
                protocol_features.activate_feature( feature_digest, pbhs.block_num );
@@ -1867,6 +1909,10 @@ struct controller_impl {
             });
          }
 
+         const uint32_t next_block_num = head->block_num + 1;
+         if( is_onblock_skipped_for_block( next_block_num ) ) {
+            wlog( "historical exception: skipping onblock implicit transaction for block ${bn}", ("bn", next_block_num) );
+         } else {
          try {
             transaction_metadata_ptr onbtrx =
                   transaction_metadata::create_no_recover_keys( std::make_shared<packed_transaction>( get_on_block_transaction() ),
@@ -1894,6 +1940,7 @@ struct controller_impl {
             edump((e.what()));
          } catch( ... ) {
             elog( "on block transaction failed due to unknown exception" );
+         }
          }
 
          clear_expired_input_transactions(deadline);
@@ -2213,15 +2260,23 @@ struct controller_impl {
 
          if( producer_block_id != ab._id ) {
             bool historical_bypass = false;
-            if( !historical_exceptions.action_mroot_zero_windows.empty()
-                && b->action_mroot == digest_type() )
-            {
+            if( !historical_exceptions.action_mroot_zero_windows.empty() ) {
                const uint32_t bn = b->block_num();
                for( const auto& w : historical_exceptions.action_mroot_zero_windows ) {
                   if( bn < w.from_block || bn > w.to_block ) continue;
+                  // Bypass demands that EVERY block header field other than
+                  // action_mroot matches what the producer recorded. The
+                  // canonical chain may carry either a zero action_mroot
+                  // (broken build emitted empty digests) or a non-zero one
+                  // that simply diverges from what a sound replay computes;
+                  // in either case the only allowed difference within a
+                  // declared window is action_mroot itself.
                   if( !other_header_fields_match( *b, *ab._unsigned_block ) ) continue;
-                  wlog( "historical action_mroot=0 exception applied for block ${bn} in window [${a}..${c}]: ${r}",
-                        ("bn", bn)("a", w.from_block)("c", w.to_block)("r", w.reason) );
+                  wlog( "historical action_mroot bypass applied for block ${bn} in window [${a}..${c}] "
+                        "(producer mroot ${pm}, local mroot ${lm}): ${r}",
+                        ("bn", bn)("a", w.from_block)("c", w.to_block)
+                        ("pm", b->action_mroot)("lm", ab._unsigned_block->action_mroot)
+                        ("r", w.reason) );
                   historical_bypass = true;
                   break;
                }

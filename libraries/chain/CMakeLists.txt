@@ -101,6 +101,7 @@ add_library( eosio_chain
              eosio_contract_abi_bin.cpp
              chain_config.cpp
              chain_id_type.cpp
+             chain_exceptions_builtin.cpp
              genesis_state.cpp
              ${CMAKE_CURRENT_BINARY_DIR}/genesis_state_root_key.cpp
 
