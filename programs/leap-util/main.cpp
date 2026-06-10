@@ -8,6 +8,7 @@
 #include "actions/blocklog.hpp"
 #include "actions/chain.hpp"
 #include "actions/generic.hpp"
+#include "actions/genesis.hpp"
 #include "actions/snapshot.hpp"
 
 #include <memory>
@@ -40,6 +41,10 @@ int main(int argc, char** argv) {
    // chain subcommand from nodeos chain_plugin
    auto chain_subcommand = std::make_shared<chain_actions>();
    chain_subcommand->setup(app);
+
+   // built-in genesis registry
+   auto genesis_subcommand = std::make_shared<genesis_actions>();
+   genesis_subcommand->setup(app);
 
    // parse
    CLI11_PARSE(app, argc, argv);

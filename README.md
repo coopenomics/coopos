@@ -187,6 +187,16 @@ v5.1.0-abc123def456...
 
 ### Первый запуск с genesis (полный ресинк с блока 1)
 
+Начиная с **v5.3.3** канонические генезисы известных сетей вшиты в бинарь — внешний genesis.json хранить не нужно, он воспроизводится из пакета одной командой:
+
+```bash
+leap-util genesis list                       # имена и chain_id вшитых генезисов
+leap-util genesis print mainnet > genesis.json   # канонический genesis основной сети
+leap-util genesis print testnet > genesis.json   # ... или тестнета
+```
+
+`chain_id` печатается в stderr — сверьте его с `get_info` любого пира перед синком. Дев-форки не затронуты: дефолтный genesis (без аргументов nodeos) по-прежнему использует апстримовый `EOSIO_ROOT_KEY`.
+
 `--genesis-json` принимается nodeos **только если `data-dir` пуст** (отсутствуют каталоги `state`, `blocks`, `state-history`, `snapshots`). Поэтому при первом запуске или при намеренном пересинке:
 
 ```bash
