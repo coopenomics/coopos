@@ -15,7 +15,7 @@ set( CXX_STANDARD_REQUIRED ON)
 
 set(VERSION_MAJOR 5)
 set(VERSION_MINOR 3)
-set(VERSION_PATCH 1)
+set(VERSION_PATCH 2)
 set(VERSION_SUFFIX "" CACHE STRING "Optional pre-release suffix appended to version (e.g. rc1, beta). Empty = clean release.")
 
 if(VERSION_SUFFIX)
