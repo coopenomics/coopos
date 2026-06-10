@@ -18,7 +18,7 @@ namespace {
  *   mainnet  6e37f9ac0f0ea717bfdbf57d1dd5d7f0e2d773227d9659a63bbf86eec0326c1b
  *   testnet  f0364a3f9fd913081f1c0b05c6f8f50a59b2ba60bb928cb321ba3a9a36316624
  */
-const std::vector<builtin_genesis_entry> _registry = [] {
+std::vector<builtin_genesis_entry> make_registry() {
    std::vector<builtin_genesis_entry> v;
 
    {
@@ -40,12 +40,18 @@ const std::vector<builtin_genesis_entry> _registry = [] {
    }
 
    return v;
-}();
+}
 
 } // anonymous namespace
 
 const std::vector<builtin_genesis_entry>& get_builtin_genesis_registry() {
-   return _registry;
+   // Function-local static: built on first use, NOT during static
+   // initialization. Parsing a public_key_type touches fc internals whose
+   // own static state may not exist yet during global static init — a
+   // namespace-scope registry crashed every leap-util invocation with
+   // fc::assert_exception before main() (static init order fiasco).
+   static const std::vector<builtin_genesis_entry> registry = make_registry();
+   return registry;
 }
 
 } } // namespace eosio::chain

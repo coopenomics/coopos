@@ -22,7 +22,7 @@ namespace {
  * file with the matching chain_id; the file replaces the builtin record
  * entirely for that node.
  */
-const std::vector<chain_historical_exceptions> _builtin_registry = [] {
+std::vector<chain_historical_exceptions> make_builtin_registry() {
    std::vector<chain_historical_exceptions> v;
 
    // -----------------------------------------------------------------------
@@ -97,12 +97,18 @@ const std::vector<chain_historical_exceptions> _builtin_registry = [] {
    }
 
    return v;
-}();
+}
 
 } // anonymous namespace
 
 const std::vector<chain_historical_exceptions>& get_builtin_historical_exceptions() {
-   return _builtin_registry;
+   // Function-local static (first-use init). A namespace-scope static would
+   // run during static initialization, before fc's own statics are ready —
+   // the equivalent registry in chain_genesis_builtin.cpp crashed leap-util
+   // on startup that way (static init order fiasco). chain_id_type parsing
+   // happens to survive global init today, but do not rely on it.
+   static const std::vector<chain_historical_exceptions> registry = make_builtin_registry();
+   return registry;
 }
 
 } } // namespace eosio::chain
