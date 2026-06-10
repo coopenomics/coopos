@@ -35,25 +35,34 @@ const std::vector<chain_historical_exceptions> _builtin_registry = [] {
    //     (fixed in 5bb051f9a "переместить в конец таблиц — ABI compat");
    //   - the on_activation handler for ASSERT_RECOVER_KEY_ACCOUNT was not
    //     registered (fixed in 2c23b8108).
-   // While that build was producing, the implicit onblock action emitted
-   // no receipts (`_action_receipt_digests` stayed empty) for 2395 blocks,
-   // finalizing `action_mroot = 0`. The BP restarted onto a fixed v5.2.0
-   // build at ~10:43:39 UTC; block 113275717 is the first post-recovery
-   // block with a non-zero action_mroot. ASSERT_RECOVER_KEY_ACCOUNT itself
-   // was only formally activated much later, at block 113318028 (16:36 UTC).
+   // While that build was producing, the implicit onblock action THREW on
+   // every block (its exception is swallowed by start_block) — no receipts,
+   // no state mutations, `action_mroot` finalized as zero for 2395 blocks
+   // [113273322..113275716]. Recovery came in-band: block 113275717 carries
+   // a single `eosio::setcode` that replaced the system contract with a
+   // build avoiding the broken intrinsic; onblock was still failing while
+   // that very block was produced (its mroot covers only the setcode
+   // receipt), and from 113275718 onward onblock works again. The BP binary
+   // was NOT restarted between those blocks (timestamps are 0.5s apart).
+   // ASSERT_RECOVER_KEY_ACCOUNT itself was only formally activated later,
+   // at block 113318028 (16:36 UTC), on an already-fixed binary.
    //
-   // For a sound replay against this chain we need to:
-   //   (a) accept zero-mroot blocks in [113273322..113275716] even though
-   //       our build would compute a non-zero local mroot, because the
-   //       canonical chain stores zero;
-   //   (b) skip onblock execution in that same window so we do NOT mutate
-   //       chainbase (e.g. block_summary_object) for those 2395 blocks —
-   //       the canonical chain skipped those mutations and our local state
-   //       must match for downstream blocks to validate.
+   // For a sound replay against this chain we need, through 113275717
+   // INCLUSIVE (verified empirically on a full replay 2026-06-10):
+   //   (a) skip onblock execution — the canonical chain never applied
+   //       onblock's side effects in these blocks, and a replay that runs
+   //       onblock diverges in chainbase (sequence counters etc.) from
+   //       113275717 onward;
+   //   (b) accept an action_mroot mismatch — zero in the canonical chain
+   //       for the 2395 empty blocks; in 113275717 the canonical mroot
+   //       covers only the setcode receipt.
+   // User transactions inside the window still execute normally (there are
+   // none in the 2395 empty blocks; 113275717's setcode is applied as on
+   // the canonical chain).
    // No handler suppression is needed: the activation handler that adds
    // `assert_recover_key_account` to whitelisted_intrinsics runs at block
    // 113318028, by which time the BP was already on the fixed binary, so
-   // the canonical chain and a v5.3.1 replay agree from that block onward.
+   // the canonical chain and this replay agree from that block onward.
    // -----------------------------------------------------------------------
    {
       chain_historical_exceptions e;
@@ -62,23 +71,26 @@ const std::vector<chain_historical_exceptions> _builtin_registry = [] {
 
       e.action_mroot_zero_windows.push_back({
          /* from_block */ 113273322u,
-         /* to_block   */ 113275716u,
+         /* to_block   */ 113275717u,
          /* reason     */
          "Coopenomics mainnet: 2395 irreversible blocks finalized with empty "
          "_action_receipt_digests (action_mroot = 0) by v5.2.0-dev-294edf3b8 "
-         "between 2026-05-11 10:18 and 10:43 UTC; window boundaries verified "
-         "via leap-util block-log print-log on archived blocks.log."
+         "between 2026-05-11 10:18 and 10:43 UTC, plus block 113275717 whose "
+         "canonical mroot covers only the recovery setcode receipt (onblock "
+         "was still failing when it was produced)."
       });
 
       e.onblock_skip_windows.push_back({
          /* from_block */ 113273322u,
-         /* to_block   */ 113275716u,
+         /* to_block   */ 113275717u,
          /* reason     */
-         "Coopenomics mainnet: onblock implicit action did not record receipts "
-         "on the buggy BP build (mis-ordered intrinsic table), so the canonical "
-         "chain skipped onblock side-effects for these 2395 blocks. A correct "
-         "replay must skip onblock here too, otherwise chainbase mutations "
-         "diverge from canonical state and every later block fails to validate."
+         "Coopenomics mainnet: the onblock implicit action threw on every "
+         "block of the buggy BP build (mis-ordered intrinsic table) up to and "
+         "including 113275717, the block whose setcode replaced the system "
+         "contract and revived onblock from 113275718 onward. A correct "
+         "replay must skip onblock through 113275717, otherwise chainbase "
+         "mutations diverge from canonical state and every later block fails "
+         "to validate. Verified empirically on a full replay 2026-06-10."
       });
 
       v.push_back( std::move(e) );
