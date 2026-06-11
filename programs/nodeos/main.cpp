@@ -4,6 +4,7 @@
 #include <eosio/http_plugin/http_plugin.hpp>
 #include <eosio/net_plugin/net_plugin.hpp>
 #include <eosio/producer_plugin/producer_plugin.hpp>
+#include <eosio/signature_provider_plugin/signature_provider_plugin.hpp>
 #include <eosio/resource_monitor_plugin/resource_monitor_plugin.hpp>
 #include <eosio/version/version.hpp>
 
@@ -30,11 +31,15 @@ namespace detail {
 
 void log_non_default_options(const std::vector<bpo::basic_option<char>>& options) {
    using namespace std::string_literals;
+   auto mask_private = [](const string& v) {
+      auto [pub_key_str, spec_type_str, spec_data] = signature_provider_plugin::parse_signature_provider_spec(v);
+      return pub_key_str + "=" + spec_type_str + ":***";
+   };
+
    string result;
    for (const auto& op : options) {
       bool mask = false;
-      if (op.string_key == "signature-provider"s
-          || op.string_key == "peer-private-key"s
+      if (op.string_key == "peer-private-key"s
           || op.string_key == "p2p-auto-bp-peer"s) {
          mask = true;
       }
@@ -42,7 +47,9 @@ void log_non_default_options(const std::vector<bpo::basic_option<char>>& options
       for (auto i = op.value.cbegin(), b = op.value.cbegin(), e = op.value.cend(); i != e; ++i) {
          if (i != b)
             v += ", ";
-         if (mask)
+         if (op.string_key == "signature-provider"s)
+            v += mask_private(*i);
+         else if (mask)
             v += "***";
          else
             v += *i;
@@ -147,6 +154,9 @@ enum return_codes {
 
 int main(int argc, char** argv)
 {
+
+   ilog("nodeos started");
+
    try {
       appbase::scoped_app app;
       fc::scoped_exit<std::function<void()>> on_exit = [&]() {
@@ -178,6 +188,12 @@ int main(int argc, char** argv)
          }
          return INITIALIZE_FAIL;
       }
+      producer_plugin& prod_plug = app->get_plugin<producer_plugin>();
+      app->set_stop_executor_cb([&app, &prod_plug]() {
+         ilog("appbase quit called");
+         prod_plug.interrupt();
+         app->get_io_context().stop();
+      });
       if (auto resmon_plugin = app->find_plugin<resource_monitor_plugin>()) {
          resmon_plugin->monitor_directory(app->data_dir());
       } else {
@@ -200,11 +216,15 @@ int main(int argc, char** argv)
    } catch( const node_management_success& e ) {
       return NODE_MANAGEMENT_SUCCESS;
    } catch( const fc::exception& e ) {
+
       if( e.code() == fc::std_exception_code ) {
          if( e.top_message().find( "atabase dirty flag set" ) != std::string::npos ) {
             elog( "database dirty flag set (likely due to unclean shutdown): replay required" );
             return DATABASE_DIRTY;
          }
+      } else if (e.code() == interrupt_exception::code_value) {
+         ilog("Interrupted, successfully exiting");
+         return SUCCESS;
       }
       elog( "${e}", ("e", e.to_detail_string()));
       return OTHER_FAIL;

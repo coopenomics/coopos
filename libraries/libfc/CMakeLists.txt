@@ -35,7 +35,6 @@ set( fc_sources
      src/crypto/crc.cpp
      src/crypto/city.cpp
      src/crypto/base58.cpp
-     src/crypto/base64.cpp
      src/crypto/bigint.cpp
      src/crypto/hex.cpp
      src/crypto/sha1.cpp
@@ -53,6 +52,10 @@ set( fc_sources
      src/crypto/public_key.cpp
      src/crypto/private_key.cpp
      src/crypto/signature.cpp
+     src/crypto/bls_private_key.cpp
+     src/crypto/bls_public_key.cpp
+     src/crypto/bls_signature.cpp
+     src/crypto/bls_utils.cpp
      src/crypto/modular_arithmetic.cpp
      src/crypto/blake2.cpp
      src/crypto/k1_recover.cpp
@@ -100,7 +103,7 @@ if(APPLE)
   find_library(corefoundation_framework CoreFoundation)
 endif()
 target_link_libraries( fc PUBLIC Boost::date_time Boost::chrono Boost::iostreams Boost::interprocess Boost::multi_index Boost::dll
-                                 Boost::multiprecision Boost::beast Boost::asio Boost::thread Boost::unit_test_framework Threads::Threads
+                                 Boost::multiprecision Boost::beast Boost::asio Boost::thread Boost::crc Threads::Threads
                                  boringssl ZLIB::ZLIB ${PLATFORM_SPECIFIC_LIBS} ${CMAKE_DL_LIBS} secp256k1 bls12-381 ${security_framework} ${corefoundation_framework})
 
 add_subdirectory( test )

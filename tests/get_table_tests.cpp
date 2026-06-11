@@ -64,7 +64,7 @@ issue_tokens( validating_tester& t, account_name issuer, account_name to, const 
 }
 
 BOOST_FIXTURE_TEST_CASE( get_scope_test, validating_tester ) try {
-   produce_blocks(2);
+   produce_block();
 
    create_accounts({ "eosio.token"_n, "eosio.ram"_n, "eosio.ramfee"_n, "eosio.stake"_n,
       "eosio.bpay"_n, "eosio.vpay"_n, "eosio.saving"_n, "eosio.names"_n });
@@ -75,7 +75,7 @@ BOOST_FIXTURE_TEST_CASE( get_scope_test, validating_tester ) try {
 
    set_code( "eosio.token"_n, test_contracts::eosio_token_wasm() );
    set_abi( "eosio.token"_n, test_contracts::eosio_token_abi() );
-   produce_blocks(1);
+   produce_block();
 
    // create currency
    auto act = mutable_variant_object()
@@ -87,10 +87,11 @@ BOOST_FIXTURE_TEST_CASE( get_scope_test, validating_tester ) try {
    for (account_name a: accs) {
       issue_tokens( *this, config::system_account_name, a, eosio::chain::asset::from_string("999.0000 SYS") );
    }
-   produce_blocks(1);
+   produce_block();
 
    // iterate over scope
-   eosio::chain_apis::read_only plugin(*(this->control), {}, fc::microseconds::maximum(), fc::microseconds::maximum(), {});
+   std::optional<eosio::chain_apis::tracked_votes> _tracked_votes;
+   eosio::chain_apis::read_only plugin(*(this->control), {}, {}, _tracked_votes, fc::microseconds::maximum(), fc::microseconds::maximum(), {});
    eosio::chain_apis::read_only::get_table_by_scope_params param{"eosio.token"_n, "accounts"_n, "inita", "", 10};
    eosio::chain_apis::read_only::get_table_by_scope_result result = plugin.read_only::get_table_by_scope(param, fc::time_point::maximum());
 
@@ -136,7 +137,7 @@ BOOST_FIXTURE_TEST_CASE( get_scope_test, validating_tester ) try {
 } FC_LOG_AND_RETHROW() /// get_scope_test
 
 BOOST_FIXTURE_TEST_CASE( get_table_test, validating_tester ) try {
-   produce_blocks(2);
+   produce_block();
 
    create_accounts({ "eosio.token"_n, "eosio.ram"_n, "eosio.ramfee"_n, "eosio.stake"_n,
       "eosio.bpay"_n, "eosio.vpay"_n, "eosio.saving"_n, "eosio.names"_n });
@@ -147,7 +148,7 @@ BOOST_FIXTURE_TEST_CASE( get_table_test, validating_tester ) try {
 
    set_code( "eosio.token"_n, test_contracts::eosio_token_wasm() );
    set_abi( "eosio.token"_n, test_contracts::eosio_token_abi() );
-   produce_blocks(1);
+   produce_block();
 
    // create currency
    auto act = mutable_variant_object()
@@ -159,7 +160,7 @@ BOOST_FIXTURE_TEST_CASE( get_table_test, validating_tester ) try {
    for (account_name a: accs) {
       issue_tokens( *this, config::system_account_name, a, eosio::chain::asset::from_string("10000.0000 SYS") );
    }
-   produce_blocks(1);
+   produce_block();
 
    // create currency 2
    act = mutable_variant_object()
@@ -170,7 +171,7 @@ BOOST_FIXTURE_TEST_CASE( get_table_test, validating_tester ) try {
    for (account_name a: accs) {
       issue_tokens( *this, config::system_account_name, a, eosio::chain::asset::from_string("9999.0000 AAA") );
    }
-   produce_blocks(1);
+   produce_block();
 
    // create currency 3
    act = mutable_variant_object()
@@ -181,7 +182,7 @@ BOOST_FIXTURE_TEST_CASE( get_table_test, validating_tester ) try {
    for (account_name a: accs) {
       issue_tokens( *this, config::system_account_name, a, eosio::chain::asset::from_string("7777.0000 CCC") );
    }
-   produce_blocks(1);
+   produce_block();
 
    // create currency 3
    act = mutable_variant_object()
@@ -192,10 +193,11 @@ BOOST_FIXTURE_TEST_CASE( get_table_test, validating_tester ) try {
    for (account_name a: accs) {
       issue_tokens( *this, config::system_account_name, a, eosio::chain::asset::from_string("8888.0000 BBB") );
    }
-   produce_blocks(1);
+   produce_block();
 
    // get table: normal case
-   eosio::chain_apis::read_only plugin(*(this->control), {}, fc::microseconds::maximum(), fc::microseconds::maximum(), {});
+   std::optional<eosio::chain_apis::tracked_votes> _tracked_votes;
+   eosio::chain_apis::read_only plugin(*(this->control), {}, {}, _tracked_votes, fc::microseconds::maximum(), fc::microseconds::maximum(), {});
    eosio::chain_apis::read_only::get_table_rows_params p;
    p.code = "eosio.token"_n;
    p.scope = "inita";
@@ -316,7 +318,7 @@ BOOST_FIXTURE_TEST_CASE( get_table_test, validating_tester ) try {
 } FC_LOG_AND_RETHROW()
 
 BOOST_FIXTURE_TEST_CASE( get_table_by_seckey_test, validating_tester ) try {
-   produce_blocks(2);
+   produce_block();
 
    create_accounts({ "eosio.token"_n, "eosio.ram"_n, "eosio.ramfee"_n, "eosio.stake"_n,
       "eosio.bpay"_n, "eosio.vpay"_n, "eosio.saving"_n, "eosio.names"_n, "eosio.rex"_n });
@@ -327,7 +329,7 @@ BOOST_FIXTURE_TEST_CASE( get_table_by_seckey_test, validating_tester ) try {
 
    set_code( "eosio.token"_n, test_contracts::eosio_token_wasm() );
    set_abi( "eosio.token"_n, test_contracts::eosio_token_abi() );
-   produce_blocks(1);
+   produce_block();
 
    // create currency
    auto act = mutable_variant_object()
@@ -339,7 +341,7 @@ BOOST_FIXTURE_TEST_CASE( get_table_by_seckey_test, validating_tester ) try {
    for (account_name a: accs) {
       issue_tokens( *this, config::system_account_name, a, eosio::chain::asset::from_string("10000.0000 SYS") );
    }
-   produce_blocks(1);
+   produce_block();
 
    set_code( config::system_account_name, test_contracts::eosio_system_wasm() );
    set_abi( config::system_account_name, test_contracts::eosio_system_abi() );
@@ -362,10 +364,11 @@ BOOST_FIXTURE_TEST_CASE( get_table_by_seckey_test, validating_tester ) try {
    bidname("initb"_n, "org"_n, eosio::chain::asset::from_string("11.0000 SYS"));
    bidname("initc"_n, "io"_n, eosio::chain::asset::from_string("12.0000 SYS"));
    bidname("initd"_n, "html"_n, eosio::chain::asset::from_string("14.0000 SYS"));
-   produce_blocks(1);
+   produce_block();
 
    // get table: normal case
-   eosio::chain_apis::read_only plugin(*(this->control), {}, fc::microseconds::maximum(), fc::microseconds::maximum(), {});
+   std::optional<eosio::chain_apis::tracked_votes> _tracked_votes;
+   eosio::chain_apis::read_only plugin(*(this->control), {}, {}, _tracked_votes, fc::microseconds::maximum(), fc::microseconds::maximum(), {});
    eosio::chain_apis::read_only::get_table_rows_params p;
    p.code = "eosio"_n;
    p.scope = "eosio";
@@ -517,7 +520,8 @@ BOOST_FIXTURE_TEST_CASE( get_table_next_key_test, validating_tester ) try {
    // }
 
 
-   chain_apis::read_only plugin(*(this->control), {}, fc::microseconds::maximum(), fc::microseconds::maximum(), {});
+   std::optional<eosio::chain_apis::tracked_votes> _tracked_votes;
+   chain_apis::read_only plugin(*(this->control), {}, {}, _tracked_votes, fc::microseconds::maximum(), fc::microseconds::maximum(), {});
    chain_apis::read_only::get_table_rows_params params = []{
       chain_apis::read_only::get_table_rows_params params{};
       params.json=true;

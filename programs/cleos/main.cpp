@@ -342,8 +342,8 @@ eosio::chain_apis::read_only::get_consensus_parameters_results get_consensus_par
    return call(::default_url, get_consensus_parameters_func).as<eosio::chain_apis::read_only::get_consensus_parameters_results>();
 }
 
-eosio::chain_apis::read_only::get_info_results get_info() {
-   return call(::default_url, get_info_func).as<eosio::chain_apis::read_only::get_info_results>();
+eosio::chain_apis::get_info_db::get_info_results get_info() {
+   return call(::default_url, get_info_func).as<eosio::chain_apis::get_info_db::get_info_results>();
 }
 
 string generate_nonce_string() {
@@ -679,19 +679,32 @@ void print_result( const fc::variant& result ) { try {
          }
 
          cerr << status << " transaction: " << transaction_id << "  ";
-         if( net < 0 ) {
-            cerr << "<unknown>";
+         if (!tx_read) {
+            if( net < 0 ) {
+               cerr << "<unknown>";
+            } else {
+               cerr << net;
+            }
+            cerr << " bytes  ";
+            if( cpu < 0 ) {
+               cerr << "<unknown>";
+            } else {
+               cerr << cpu;
+            }
+            cerr << " us\n";
          } else {
-            cerr << net;
+            int64_t elapsed = -1;
+            if (processed.get_object().contains( "elapsed" )) {
+               elapsed = processed["elapsed"].as_int64();
+            }
+            cerr << " elapsed ";
+            if (elapsed < 0) {
+               cerr << "<unknown>";
+            } else {
+               cerr << elapsed;
+            }
+            cerr << " us\n";
          }
-         cerr << " bytes  ";
-         if( cpu < 0 ) {
-            cerr << "<unknown>";
-         } else {
-            cerr << cpu;
-         }
-
-         cerr << " us\n";
 
          if( status == "failed" ) {
             auto soft_except = processed["except"].as<std::optional<fc::exception>>();
@@ -703,7 +716,8 @@ void print_result( const fc::variant& result ) { try {
             for( const auto& a : actions ) {
                print_action_tree( a );
             }
-            wlog( "\rwarning: transaction executed locally, but may not be confirmed by the network yet" );
+            if (!tx_read && !tx_dry_run)
+               wlog( "\rwarning: transaction executed locally, but may not be confirmed by the network yet" );
          }
       } else {
          cerr << fc::json::to_pretty_string( result ) << endl;
@@ -1084,9 +1098,9 @@ struct set_action_permission_subcommand {
 bool local_port_used() {
     using namespace boost::asio;
 
-    io_service ios;
+    io_context io_ctx;
     local::stream_protocol::endpoint endpoint(wallet_url.substr(strlen("unix://")));
-    local::stream_protocol::socket socket(ios);
+    local::stream_protocol::socket socket(io_ctx);
     boost::system::error_code ec;
     socket.connect(endpoint, ec);
 
@@ -2781,10 +2795,10 @@ int main( int argc, char** argv ) {
 
    wallet_url = default_wallet_url;
 
-   CLI::App app{"Command Line Interface to EOSIO Client"};
+   CLI::App app{"Command Line Interface to Spring Client"};
 
    // custom leap formatter
-   auto fmt = std::make_shared<CLI::LeapFormatter>();
+   auto fmt = std::make_shared<CLI::SpringFormatter>();
    app.formatter(fmt);
 
    // enable help-all, display help on error
@@ -2988,6 +3002,11 @@ int main( int argc, char** argv ) {
       std::cout << fc::json::to_pretty_string(get_info()) << std::endl;
    });
 
+   // get finalizer info
+   get->add_subcommand("finalizer_info", localized("Get current finalizer information"))->callback([] {
+      std::cout << fc::json::to_pretty_string(call(get_finalizer_info_func, fc::mutable_variant_object())) << std::endl;
+   });
+
    // get transaction status
    string status_transaction_id;
    auto getTransactionStatus = get->add_subcommand("transaction-status", localized("Get transaction status information"));
@@ -3012,7 +3031,6 @@ int main( int argc, char** argv ) {
    get_block_params params;
    auto getBlock = get->add_subcommand("block", localized("Retrieve a full block from the blockchain"));
    getBlock->add_option("block", params.blockArg, localized("The number or ID of the block to retrieve"))->required();
-   getBlock->add_flag("--header-state", params.get_bhs, localized("Get block header state from fork database instead") );
    getBlock->add_flag("--info", params.get_binfo, localized("Get block info from the blockchain by block num only") );
    getBlock->add_flag("--raw", params.get_braw, localized("Get raw block from the blockchain") );
    getBlock->add_flag("--header", params.get_bheader, localized("Get block header from the blockchain") );
@@ -3020,7 +3038,7 @@ int main( int argc, char** argv ) {
 
    getBlock->callback([&params] {
       int num_flags = params.get_bhs + params.get_binfo + params.get_braw + params.get_bheader + params.get_bheader_extensions;
-      EOSC_ASSERT( num_flags <= 1, "ERROR: Only one of the following flags can be set: --header-state, --info, --raw, --header, --header-with-extensions." );
+      EOSC_ASSERT( num_flags <= 1, "ERROR: Only one of the following flags can be set: --info, --raw, --header, --header-with-extensions." );
       if (params.get_binfo) {
          std::optional<int64_t> block_num;
          try {
@@ -3033,9 +3051,7 @@ int main( int argc, char** argv ) {
          std::cout << fc::json::to_pretty_string(call(get_block_info_func, arg)) << std::endl;
       } else {
          const auto arg = fc::variant_object("block_num_or_id", params.blockArg);
-         if (params.get_bhs) {
-            std::cout << fc::json::to_pretty_string(call(get_block_header_state_func, arg)) << std::endl;
-         } else if (params.get_braw) {
+         if (params.get_braw) {
             std::cout << fc::json::to_pretty_string(call(get_raw_block_func, arg)) << std::endl;
          } else if (params.get_bheader || params.get_bheader_extensions) {
             std::cout << fc::json::to_pretty_string(
@@ -3931,6 +3947,7 @@ int main( int argc, char** argv ) {
    actionsSubcommand->add_option("action", action,
                                  localized("A JSON string or filename defining the action to execute on the contract"))->required()->capture_default_str();
    actionsSubcommand->add_option("data", data, localized("The arguments to the contract"))->required();
+   actionsSubcommand->add_flag("--dry-run", tx_dry_run, localized("Specify an action is dry-run"));
    actionsSubcommand->add_flag("--read", tx_read, localized("Specify an action is read-only"));
 
    add_standard_transaction_options_plus_signing(actionsSubcommand);

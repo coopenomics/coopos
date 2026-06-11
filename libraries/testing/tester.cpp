@@ -5,6 +5,7 @@
 #include <eosio/chain/wast_to_wasm.hpp>
 #include <eosio/chain/eosio_contract.hpp>
 #include <eosio/chain/generated_transaction_object.hpp>
+#include <eosio/testing/bls_utils.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/copy.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
@@ -19,7 +20,12 @@ eosio::chain::asset core_from_string(const std::string& s) {
   return eosio::chain::asset::from_string(s + " " CORE_SYMBOL_NAME);
 }
 
-namespace eosio { namespace testing {
+using bls_private_key = fc::crypto::blslib::bls_private_key;
+using bls_public_key = fc::crypto::blslib::bls_public_key;
+
+namespace eosio::testing {
+
+   fc::logger test_logger = fc::logger::get();
 
    // required by boost::unit_test::data
    std::ostream& operator<<(std::ostream& os, setup_policy p) {
@@ -175,8 +181,8 @@ namespace eosio { namespace testing {
       return pfs;
    }
 
-   bool base_tester::is_same_chain( base_tester& other ) {
-     return control->head_block_id() == other.control->head_block_id();
+   bool base_tester::is_same_chain( base_tester& other ) const {
+     return control->head().id() == other.control->head().id();
    }
 
    void base_tester::init(const setup_policy policy, db_read_mode read_mode, std::optional<uint32_t> genesis_max_inline_action_size) {
@@ -184,37 +190,37 @@ namespace eosio { namespace testing {
       def_conf.first.read_mode = read_mode;
       cfg = def_conf.first;
 
-      open(def_conf.second);
+      open(def_conf.second, call_startup_t::yes);
       execute_setup_policy(policy);
    }
 
    void base_tester::init(controller::config config, const snapshot_reader_ptr& snapshot) {
-      cfg = config;
+      cfg = std::move(config);
       open(snapshot);
    }
 
-   void base_tester::init(controller::config config, const genesis_state& genesis) {
-      cfg = config;
-      open(genesis);
+   void base_tester::init(controller::config config, const genesis_state& genesis, call_startup_t call_startup) {
+      cfg = std::move(config);
+      open(genesis, call_startup);
    }
 
    void base_tester::init(controller::config config) {
-      cfg = config;
+      cfg = std::move(config);
       open(default_genesis().compute_chain_id());
    }
 
    void base_tester::init(controller::config config, protocol_feature_set&& pfs, const snapshot_reader_ptr& snapshot) {
-      cfg = config;
+      cfg = std::move(config);
       open(std::move(pfs), snapshot);
    }
 
    void base_tester::init(controller::config config, protocol_feature_set&& pfs, const genesis_state& genesis) {
-      cfg = config;
-      open(std::move(pfs), genesis);
+      cfg = std::move(config);
+      open(std::move(pfs), genesis, call_startup_t::yes);
    }
 
    void base_tester::init(controller::config config, protocol_feature_set&& pfs) {
-      cfg = config;
+      cfg = std::move(config);
       open(std::move(pfs), default_genesis().compute_chain_id());
    }
 
@@ -259,24 +265,36 @@ namespace eosio { namespace testing {
                builtin_protocol_feature_t::get_sender,
                builtin_protocol_feature_t::ram_restrictions,
                builtin_protocol_feature_t::webauthn_key,
-               builtin_protocol_feature_t::wtmsig_block_signatures
+               builtin_protocol_feature_t::wtmsig_block_signatures,
+               builtin_protocol_feature_t::bls_primitives
             });
             produce_block();
-            set_bios_contract();
             break;
          }
          case setup_policy::full:
-         case setup_policy::full_except_do_not_disable_deferred_trx: {
+         case setup_policy::full_except_do_not_disable_deferred_trx:
+         case setup_policy::full_except_do_not_transition_to_savanna: {
             schedule_preactivate_protocol_feature();
             produce_block();
             set_before_producer_authority_bios_contract();
-            if( policy == setup_policy::full ) {
-               preactivate_all_builtin_protocol_features();
-            } else {
+            if( policy == setup_policy::full_except_do_not_disable_deferred_trx ) {
                preactivate_all_but_disable_deferred_trx();
+            } else {
+               preactivate_all_builtin_protocol_features();
             }
             produce_block();
-            set_bios_contract();
+            if (policy == setup_policy::full || policy == setup_policy::full_except_do_not_transition_to_savanna ) {
+               set_bios_contract();
+            }
+
+            // Do not transition to Savanna under full_except_do_not_transition_to_savanna or
+            // full_except_do_not_disable_deferred_trx
+            if( policy == setup_policy::full ) {
+               // BLS voting is slow. Use only 1 finalizer for default testser.
+               finalizer_keys fin_keys(*this, 1u /* num_keys */, 1u /* finset_size */);
+               fin_keys.activate_savanna(0u /* first_key_idx */);
+            }
+
             break;
          }
          case setup_policy::none:
@@ -288,18 +306,51 @@ namespace eosio { namespace testing {
    void base_tester::close() {
       control.reset();
       chain_transactions.clear();
+      blocks_signaled.clear();
    }
+
+   bool base_tester::is_open() const { return !!control; }
 
    void base_tester::open( const snapshot_reader_ptr& snapshot ) {
       open( make_protocol_feature_set(), snapshot );
    }
 
-   void base_tester::open( const genesis_state& genesis ) {
-      open( make_protocol_feature_set(), genesis );
+   void base_tester::open( const genesis_state& genesis, call_startup_t call_startup ) {
+      open( make_protocol_feature_set(), genesis, call_startup );
    }
 
    void base_tester::open( std::optional<chain_id_type> expected_chain_id ) {
       open( make_protocol_feature_set(), expected_chain_id );
+   }
+
+   bool base_tester::_check_signal(const block_id_type& id, block_signal sig) {
+      auto update_sig = fc::make_scoped_exit([&]() { blocks_signaled[id] = sig; });
+
+      auto itr = blocks_signaled.find(id);
+      bool present = itr != blocks_signaled.end();
+
+      switch(sig) {
+      case block_signal::block_start:
+         return true;  // only block number is signaled,
+
+      case block_signal::accepted_block_header:
+         // should get accepted_block_header signal only once, and before accepted_block signal;
+         return !present;
+
+      case block_signal::accepted_block:
+         // should get accepted_block signal after accepted_block_header signal
+         // or after accepted_block (on fork switch, accepted block signaled when block re-applied)
+         // or first thing on restart if applying out of the forkdb
+         return !present || (present && (itr->second == block_signal::accepted_block_header ||
+                                         itr->second == block_signal::accepted_block));
+
+      case block_signal::irreversible_block:
+         // can be signaled on restart as the first thing since other signals happened before shutdown
+         return !present ||
+                (present && itr->second == block_signal::accepted_block);
+      }
+
+      return false;
    }
 
    void base_tester::open( protocol_feature_set&& pfs, std::optional<chain_id_type> expected_chain_id, const std::function<void()>& lambda ) {
@@ -319,21 +370,52 @@ namespace eosio { namespace testing {
 
       control.reset( new controller(cfg, std::move(pfs), *expected_chain_id) );
       control->add_indices();
+      control->testing_allow_voting(true);
       if (lambda) lambda();
-      chain_transactions.clear();
-      control->accepted_block.connect([this]( block_signal_params t ){
-        const auto& [ block, id ] = t;
-        FC_ASSERT( block );
-          for( auto receipt : block->transactions ) {
-              if( std::holds_alternative<packed_transaction>(receipt.trx) ) {
-                  auto &pt = std::get<packed_transaction>(receipt.trx);
-                  chain_transactions[pt.get_transaction().id()] = std::move(receipt);
-              } else {
-                  auto& id = std::get<transaction_id_type>(receipt.trx);
-                  chain_transactions[id] = std::move(receipt);
-              }
-          }
+      [[maybe_unused]] auto block_start_connection = control->block_start().connect([](block_num_type num) {
+         // only block number is signaled, in forking tests will get the same block number more than once.
       });
+      [[maybe_unused]] auto accepted_block_header_connection = control->accepted_block_header().connect([&](const block_signal_params& t) {
+            [[maybe_unused]] const auto& [block, id] = t;
+            assert(block);
+            assert(_check_signal(id, block_signal::accepted_block_header));
+         });
+      chain_transactions.clear();
+      [[maybe_unused]] auto accepted_block_connection = control->accepted_block().connect([this](const block_signal_params& t) {
+            const auto& [block, id] = t;
+            assert(block);
+            assert(block->block_num() > lib_number);
+            assert(_check_signal(id, block_signal::accepted_block));
+
+            for (auto receipt : block->transactions) {
+               if (std::holds_alternative<packed_transaction>(receipt.trx)) {
+                  const auto& pt = std::get<packed_transaction>(receipt.trx);
+                  chain_transactions[pt.get_transaction().id()] = std::move(receipt);
+               } else {
+                  const auto& tid = std::get<transaction_id_type>(receipt.trx);
+                  chain_transactions[tid] = std::move(receipt);
+               }
+            }
+         });
+
+      control->set_async_voting(async_t::no);      // vote synchronously so we don't have to wait for votes
+      control->set_async_aggregation(async_t::no); // aggregate votes synchronously for `_check_for_vote_if_needed`
+
+      lib_id = control->fork_db_has_root() ? control->fork_db_root().id() : block_id_type{};
+      lib_number = block_header::num_from_id(lib_id);
+      lib_block = control->fetch_block_by_id(lib_id);
+      [[maybe_unused]] auto lib_connection = control->irreversible_block().connect([&](const block_signal_params& t) {
+         const auto& [ block, id ] = t;
+         assert(block);
+         assert(_check_signal(id, block_signal::irreversible_block));
+         lib_block = block;
+         lib_id    = id;
+         assert(lib_block->block_num() > lib_number); // let's make sure that lib always increases
+         lib_number = lib_block->block_num();
+     });
+
+      if (_open_callback)
+         _open_callback();
    }
 
    void base_tester::open( protocol_feature_set&& pfs, const snapshot_reader_ptr& snapshot ) {
@@ -342,89 +424,110 @@ namespace eosio { namespace testing {
       open(std::move(pfs), snapshot_chain_id, [&snapshot,&control=this->control]() {
          control->startup( [](){}, []() { return false; }, snapshot );
       });
+      apply_blocks();
    }
 
-   void base_tester::open( protocol_feature_set&& pfs, const genesis_state& genesis ) {
-      open(std::move(pfs), genesis.compute_chain_id(), [&genesis,&control=this->control]() {
-         control->startup( [](){}, []() { return false; }, genesis );
-      });
+   void base_tester::open( protocol_feature_set&& pfs, const genesis_state& genesis, call_startup_t call_startup ) {
+      if (call_startup == call_startup_t::yes) {
+         open(std::move(pfs), genesis.compute_chain_id(), [&genesis,&control=this->control]() {
+            control->startup( [](){}, []() { return false; }, genesis );
+         });
+         apply_blocks();
+      } else {
+         open(std::move(pfs), genesis.compute_chain_id(), nullptr);
+      }
    }
 
    void base_tester::open( protocol_feature_set&& pfs, std::optional<chain_id_type> expected_chain_id ) {
       open(std::move(pfs), expected_chain_id, [&control=this->control]() {
          control->startup( [](){}, []() { return false; } );
       });
+      apply_blocks();
    }
 
-   void base_tester::push_block(signed_block_ptr b) {
-      auto bsf = control->create_block_state_future(b->calculate_id(), b);
+   void base_tester::push_block(const signed_block_ptr& b) {
+      auto block_id = b->calculate_id();
+      auto [best_fork, obh] = control->accept_block(block_id, b);
       unapplied_transactions.add_aborted( control->abort_block() );
-      controller::block_report br;
-      control->push_block( br, bsf.get(), [this]( const branch_type& forked_branch ) {
-         unapplied_transactions.add_forked( forked_branch );
+      EOS_ASSERT(obh, unlinkable_block_exception, "block did not link ${b}", ("b", b->calculate_id()));
+      const block_handle& bh = *obh;
+      control->apply_blocks( [this]( const transaction_metadata_ptr& trx ) {
+         unapplied_transactions.add_forked( trx );
       }, [this]( const transaction_id_type& id ) {
          return unapplied_transactions.get_trx( id );
       } );
 
       auto itr = last_produced_block.find(b->producer);
       if (itr == last_produced_block.end() || b->block_num() > block_header::num_from_id(itr->second)) {
-         last_produced_block[b->producer] = b->calculate_id();
+         last_produced_block[b->producer] = block_id;
       }
+      _check_for_vote_if_needed(*control, bh);
+   }
+
+   void base_tester::apply_blocks() {
+      while (control->apply_blocks( {}, {} ) == controller::apply_blocks_result::incomplete)
+         ;
    }
 
    signed_block_ptr base_tester::_produce_block( fc::microseconds skip_time, bool skip_pending_trxs ) {
-      std::vector<transaction_trace_ptr> traces;
-      return _produce_block( skip_time, skip_pending_trxs, false, traces );
+      auto res = _produce_block( skip_time, skip_pending_trxs, false );
+      return res.block;
    }
 
-   signed_block_ptr base_tester::_produce_block( fc::microseconds skip_time, bool skip_pending_trxs,
-                                                 bool no_throw, std::vector<transaction_trace_ptr>& traces ) {
-      auto head = control->head_block_state();
-      auto head_time = control->head_block_time();
+   produce_block_result_t base_tester::_produce_block( fc::microseconds skip_time, bool skip_pending_trxs, bool no_throw ) {
+      produce_block_result_t res;
+
+      auto head_time = control->head().block_time();
       auto next_time = head_time + skip_time;
+      static transaction_trace_ptr onblock_trace;
 
       if( !control->is_building_block() || control->pending_block_time() != next_time ) {
-         _start_block( next_time );
+         res.onblock_trace = _start_block( next_time );
+      } else {
+         res.onblock_trace = std::move(onblock_trace); // saved from _start_block call in last _produce_block
       }
 
       if( !skip_pending_trxs ) {
          for( auto itr = unapplied_transactions.begin(); itr != unapplied_transactions.end();  ) {
             auto trace = control->push_transaction( itr->trx_meta, fc::time_point::maximum(), fc::microseconds::maximum(), DEFAULT_BILLED_CPU_TIME_US, true, 0 );
-            traces.emplace_back( trace );
             if(!no_throw && trace->except) {
                // this always throws an fc::exception, since the original exception is copied into an fc::exception
-               trace->except->dynamic_rethrow_exception();
+               throw *trace->except;
             }
             itr = unapplied_transactions.erase( itr );
+            res.unapplied_transaction_traces.emplace_back( std::move(trace) );
          }
 
          vector<transaction_id_type> scheduled_trxs;
          while ((scheduled_trxs = get_scheduled_transactions()).size() > 0 ) {
             for( const auto& trx : scheduled_trxs ) {
                auto trace = control->push_scheduled_transaction( trx, fc::time_point::maximum(), fc::microseconds::maximum(), DEFAULT_BILLED_CPU_TIME_US, true );
-               traces.emplace_back( trace );
                if( !no_throw && trace->except ) {
                   // this always throws an fc::exception, since the original exception is copied into an fc::exception
-                  trace->except->dynamic_rethrow_exception();
+                  throw *trace->except;
                }
             }
          }
       }
 
-      auto head_block = _finish_block();
+      res.block = _finish_block();
 
-      _start_block( next_time + fc::microseconds(config::block_interval_us));
-      return head_block;
+      onblock_trace = _start_block( next_time + fc::microseconds(config::block_interval_us));
+
+      if (_produce_block_callback)
+         _produce_block_callback(res.block);
+
+      return res;
    }
 
-   void base_tester::_start_block(fc::time_point block_time) {
-      auto head_block_number = control->head_block_num();
-      auto producer = control->head_block_state()->get_scheduled_producer(block_time);
+   transaction_trace_ptr base_tester::_start_block(fc::time_point block_time) {
+      auto head_block_number = control->head().block_num();
+      auto producer = control->head_active_producers().get_scheduled_producer(block_time);
 
-      auto last_produced_block_num = control->last_irreversible_block_num();
+      auto last_produced_block_num = control->fork_db_root().block_num();
       auto itr = last_produced_block.find(producer.producer_name);
       if (itr != last_produced_block.end()) {
-         last_produced_block_num = std::max(control->last_irreversible_block_num(), block_header::num_from_id(itr->second));
+         last_produced_block_num = std::max(control->fork_db_root().block_num(), block_header::num_from_id(itr->second));
       }
 
       unapplied_transactions.add_aborted( control->abort_block() );
@@ -444,31 +547,33 @@ namespace eosio { namespace testing {
          preactivated_protocol_features.end()
       );
 
-      control->start_block( block_time, head_block_number - last_produced_block_num, feature_to_be_activated,
-                            controller::block_status::incomplete );
+      auto onblock_trace = control->start_block( block_time, head_block_number - last_produced_block_num,
+                                                 feature_to_be_activated,
+                                                 controller::block_status::incomplete );
 
       // Clear the list, if start block finishes successfuly, the protocol features should be assumed to be activated
       protocol_features_to_be_activated_wo_preactivation.clear();
+      return onblock_trace;
    }
 
    signed_block_ptr base_tester::_finish_block() {
       FC_ASSERT( control->is_building_block(), "must first start a block before it can be finished" );
 
-      auto producer = control->head_block_state()->get_scheduled_producer( control->pending_block_time() );
+      auto auth = control->pending_block_signing_authority();
+      auto producer_name = control->pending_block_producer();
       vector<private_key_type> signing_keys;
 
-      auto default_active_key = get_public_key( producer.producer_name, "active");
-      producer.for_each_key([&](const public_key_type& key){
+      auto default_active_key = get_public_key( producer_name, "active");
+      producer_authority::for_each_key(auth, [&](const public_key_type& key){
          const auto& iter = block_signing_private_keys.find(key);
          if(iter != block_signing_private_keys.end()) {
             signing_keys.push_back(iter->second);
          } else if (key == default_active_key) {
-            signing_keys.emplace_back( get_private_key( producer.producer_name, "active") );
+            signing_keys.emplace_back( get_private_key( producer_name, "active") );
          }
       });
 
-      controller::block_report br;
-      control->finalize_block( br, [&]( digest_type d ) {
+      control->assemble_and_complete_block( [&]( digest_type d ) {
          std::vector<signature_type> result;
          result.reserve(signing_keys.size());
          for (const auto& k: signing_keys)
@@ -478,23 +583,42 @@ namespace eosio { namespace testing {
       } );
 
       control->commit_block();
-      last_produced_block[control->head_block_state()->header.producer] = control->head_block_state()->id;
 
-      return control->head_block_state()->block;
+      block_handle head = control->head();
+
+      last_produced_block[producer_name] = head.id();
+      _check_for_vote_if_needed(*control, head);
+      return head.block();
    }
 
-   signed_block_ptr base_tester::produce_block( std::vector<transaction_trace_ptr>& traces ) {
-      return _produce_block( fc::milliseconds(config::block_interval_ms), false, true, traces );
-   }
-
-   void base_tester::produce_blocks( uint32_t n, bool empty ) {
-      if( empty ) {
-         for( uint32_t i = 0; i < n; ++i )
-            produce_empty_block();
-      } else {
-         for( uint32_t i = 0; i < n; ++i )
-            produce_block();
+   void base_tester::_check_for_vote_if_needed(controller& c, const block_handle& bh) {
+      if (_expect_votes) {
+         // `_expect_votes` should be true *only* when we expect an active finalizer to
+         // vote on every block.
+         // This is not the case for tests with forks, so for these tests we should set
+         // `_expect_votes` to false by calling `base_tester::do_check_for_votes(false)`
+         // ----------------------------------------------------------------------------
+         FC_ASSERT(!c.get_testing_allow_voting_flag() || !c.is_block_missing_finalizer_votes(bh), "Missing expected vote");
       }
+   }
+
+   signed_block_ptr base_tester::produce_blocks( uint32_t n, bool empty ) {
+      signed_block_ptr res;
+      bool allow_voting_originally = control->get_testing_allow_voting_flag();
+
+      for (uint32_t i = 0; i < n; ++i) {
+         // For performance, only vote on the last four to move finality.
+         // Modify testing_allow_voting only if it was set to true originally;
+         // otherwise the testing_allow_voting would be set to true when the following condition is met even though the user of
+         // `produce_blocks` wants it to be true.
+         if (allow_voting_originally && n > 6) {
+            // Some tests like the ones for proposer policy transition rely on LIB advance
+            // at least every round (12 blocks). Vote first 2 out of every 12 blocks.
+            control->testing_allow_voting((i%12) < 2  || i >= n - 4); // This is 4 instead of 3 because the extra block has to be produced to log_irreversible
+         }
+         res = empty ? produce_empty_block() : produce_block();
+      }
+      return res;
    }
 
    vector<transaction_id_type> base_tester::get_scheduled_transactions() const {
@@ -515,7 +639,7 @@ namespace eosio { namespace testing {
       while(true) {
          blocks_per_round = control->active_producers().producers.size() * config::producer_repetitions;
          produce_block();
-         if (control->head_block_num() % blocks_per_round == (blocks_per_round - 1)) break;
+         if (control->head().block_num() % blocks_per_round == (blocks_per_round - 1)) break;
       }
    }
 
@@ -528,7 +652,7 @@ namespace eosio { namespace testing {
    void base_tester::produce_min_num_of_blocks_to_spend_time_wo_inactive_prod(const fc::microseconds target_elapsed_time) {
       fc::microseconds elapsed_time;
       while (elapsed_time < target_elapsed_time) {
-         for(uint32_t i = 0; i < control->head_block_state()->active_schedule.producers.size(); i++) {
+         for(uint32_t i = 0; i < control->active_producers().producers.size(); i++) {
             const auto time_to_skip = fc::milliseconds(config::producer_repetitions * config::block_interval_ms);
             produce_block(time_to_skip);
             elapsed_time += time_to_skip;
@@ -542,14 +666,14 @@ namespace eosio { namespace testing {
    }
 
 
-  void base_tester::set_transaction_headers( transaction& trx, uint32_t expiration, uint32_t delay_sec ) const {
-     trx.expiration = fc::time_point_sec{control->head_block_time() + fc::seconds(expiration)};
-     trx.set_reference_block( control->head_block_id() );
+   void base_tester::set_transaction_headers( transaction& trx, uint32_t expiration, uint32_t delay_sec ) const {
+      trx.expiration = fc::time_point_sec{control->head().block_time() + fc::seconds(expiration)};
+      trx.set_reference_block( control->head().id() );
 
-     trx.max_net_usage_words = 0; // No limit
-     trx.max_cpu_usage_ms = 0; // No limit
-     trx.delay_sec = delay_sec;
-  }
+      trx.max_net_usage_words = 0; // No limit
+      trx.max_cpu_usage_ms = 0; // No limit
+      trx.delay_sec = delay_sec;
+   }
 
 
    transaction_trace_ptr base_tester::create_account( account_name a, account_name creator, bool multisig, bool include_code ) {
@@ -604,7 +728,7 @@ namespace eosio { namespace testing {
                                                       )
    { try {
       if( !control->is_building_block() )
-         _start_block(control->head_block_time() + fc::microseconds(config::block_interval_us));
+         _start_block(control->head().block_time() + fc::microseconds(config::block_interval_us));
 
       auto ptrx = std::make_shared<packed_transaction>(trx);
       auto time_limit = deadline == fc::time_point::maximum() ?
@@ -625,7 +749,7 @@ namespace eosio { namespace testing {
                                                       )
    { try {
       if( !control->is_building_block() )
-         _start_block(control->head_block_time() + fc::microseconds(config::block_interval_us));
+         _start_block(control->head().block_time() + fc::microseconds(config::block_interval_us));
       auto c = packed_transaction::compression_type::none;
 
       if( fc::raw::pack_size(trx) > 1000 ) {
@@ -726,12 +850,9 @@ namespace eosio { namespace testing {
       string action_type_name = abis.get_action_type(acttype);
       FC_ASSERT( action_type_name != string(), "unknown action type ${a}", ("a",acttype) );
 
-
-      action act;
-      act.account = code;
-      act.name = acttype;
-      act.authorization = auths;
-      act.data = abis.variant_to_binary(action_type_name, data, abi_serializer::create_yield_function( abi_serializer_max_time ));
+      action act(std::move(auths), code, acttype,
+                 abis.variant_to_binary(action_type_name, data,
+                                        abi_serializer::create_yield_function(abi_serializer_max_time)));
       return act;
    } FC_CAPTURE_AND_RETHROW() }
 
@@ -1029,8 +1150,11 @@ namespace eosio { namespace testing {
       return asset(result, asset_symbol);
    }
 
-
    vector<char> base_tester::get_row_by_account( name code, name scope, name table, const account_name& act ) const {
+      return get_row_by_id( code, scope, table, act.to_uint64_t() );
+   }
+
+   vector<char> base_tester::get_row_by_id( name code, name scope, name table, uint64_t id ) const {
       vector<char> data;
       const auto& db = control->db();
       const auto* t_id = db.find<chain::table_id_object, chain::by_code_scope_table>( boost::make_tuple( code, scope, table ) );
@@ -1041,8 +1165,8 @@ namespace eosio { namespace testing {
 
       const auto& idx = db.get_index<chain::key_value_index, chain::by_scope_primary>();
 
-      auto itr = idx.lower_bound( boost::make_tuple( t_id->id, act.to_uint64_t() ) );
-      if ( itr == idx.end() || itr->t_id != t_id->id || act.to_uint64_t() != itr->primary_key ) {
+      auto itr = idx.lower_bound( boost::make_tuple( t_id->id, id ) );
+      if ( itr == idx.end() || itr->t_id != t_id->id || id != itr->primary_key ) {
          return data;
       }
 
@@ -1050,7 +1174,6 @@ namespace eosio { namespace testing {
       memcpy( data.data(), itr->value.data(), data.size() );
       return data;
    }
-
 
    vector<uint8_t> base_tester::to_uint8_vector(const string& s) {
       vector<uint8_t> v(s.size());
@@ -1085,21 +1208,22 @@ namespace eosio { namespace testing {
 
    void base_tester::sync_with(base_tester& other) {
       // Already in sync?
-      if (control->head_block_id() == other.control->head_block_id())
+      if (control->head().id() == other.control->head().id())
          return;
       // If other has a longer chain than we do, sync it to us first
-      if (control->head_block_num() < other.control->head_block_num())
+      if (control->head().block_num() < other.control->head().block_num())
          return other.sync_with(*this);
 
       auto sync_dbs = [](base_tester& a, base_tester& b) {
-         for( uint32_t i = 1; i <= a.control->head_block_num(); ++i ) {
+         for( uint32_t i = 1; i <= a.control->head().block_num(); ++i ) {
 
             auto block = a.control->fetch_block_by_number(i);
             if( block ) { //&& !b.control->is_known_block(block->id()) ) {
-               auto bsf = b.control->create_block_state_future( block->calculate_id(), block );
+               auto id = block->calculate_id();
+               auto [best_head, obh] = b.control->accept_block( id, block );
                b.control->abort_block();
-               controller::block_report br;
-               b.control->push_block(br, bsf.get(), forked_branch_callback{}, trx_meta_cache_lookup{}); //, eosio::chain::validation_steps::created_block);
+               EOS_ASSERT(obh, unlinkable_block_exception, "block did not link ${b}", ("b", id));
+               b.control->apply_blocks({}, trx_meta_cache_lookup{});
             }
          }
       };
@@ -1127,6 +1251,7 @@ namespace eosio { namespace testing {
    vector<producer_authority> base_tester::get_producer_authorities( const vector<account_name>& producer_names )const {
        // Create producer schedule
        vector<producer_authority> schedule;
+       schedule.reserve(producer_names.size());
        for (auto& producer_name: producer_names) {
           schedule.emplace_back(producer_authority{ producer_name, block_signing_authority_v0{1, {{ get_public_key( producer_name, "active" ), 1}} } });
        }
@@ -1149,7 +1274,6 @@ namespace eosio { namespace testing {
 
       return push_action( config::system_account_name, "setprods"_n, config::system_account_name,
                           fc::mutable_variant_object()("schedule", schedule_variant));
-
    }
 
    transaction_trace_ptr base_tester::set_producers_legacy(const vector<account_name>& producer_names) {
@@ -1166,16 +1290,89 @@ namespace eosio { namespace testing {
 
       return push_action( config::system_account_name, "setprods"_n, config::system_account_name,
                           fc::mutable_variant_object()("schedule", legacy_keys));
-
    }
 
+   base_tester::set_finalizers_output_t base_tester::set_finalizers(std::span<const account_name> finalizer_names) {
+      auto num_finalizers = finalizer_names.size();
+      std::vector<finalizer_policy_input::finalizer_info> finalizers_info;
+      finalizers_info.reserve(num_finalizers);
+      for (const auto& f: finalizer_names) {
+         finalizers_info.push_back({.name = f, .weight = 1});
+      }
+
+      finalizer_policy_input policy_input = {
+         .finalizers       = finalizers_info,
+         .threshold        = num_finalizers * 2 / 3 + 1,
+         .local_finalizers = std::vector<account_name>{finalizer_names.begin(), finalizer_names.end()}
+      };
+
+      return set_finalizers(policy_input);
+   }
+
+   base_tester::set_finalizers_output_t base_tester::set_finalizers(const finalizer_policy_input& input) {
+      set_finalizers_output_t res;
+
+      chain::bls_pub_priv_key_map_t local_finalizer_keys;
+      fc::variants finalizer_auths;
+
+      for (const auto& f: input.finalizers) {
+         auto [privkey, pubkey, pop] = get_bls_key( f.name );
+
+         // if it is a local finalizer, set up public to private key mapping for voting
+         if( auto it = std::ranges::find_if(input.local_finalizers, [&](const auto& name) { return name == f.name; });
+             it != input.local_finalizers.end()) {
+            local_finalizer_keys[pubkey.to_string()] = privkey.to_string();
+            res.privkeys.emplace_back(privkey);
+         };
+
+         res.pubkeys.emplace_back(pubkey);
+
+         finalizer_auths.emplace_back(
+            fc::mutable_variant_object()
+               ("description", f.name.to_string() + " description")
+               ("weight", f.weight)
+               ("public_key", pubkey.to_string())
+               ("pop", pop.to_string()));
+      }
+
+      control->set_node_finalizer_keys(local_finalizer_keys);
+
+      fc::mutable_variant_object fin_policy_variant;
+      fin_policy_variant("threshold", input.threshold);
+      fin_policy_variant("finalizers", std::move(finalizer_auths));
+
+      res.setfinalizer_trace =
+         push_action( config::system_account_name, "setfinalizer"_n, config::system_account_name,
+                      fc::mutable_variant_object()("finalizer_policy", std::move(fin_policy_variant)));
+      return res;
+   }
+
+   void base_tester::set_node_finalizers(std::span<const account_name> names) {
+      bls_pub_priv_key_map_t local_finalizer_keys;
+      for (auto name: names) {
+         auto [privkey, pubkey, pop] = get_bls_key(name);
+         local_finalizer_keys[pubkey.to_string()] = privkey.to_string();
+      }
+      control->set_node_finalizer_keys(local_finalizer_keys);
+   }
+
+   base_tester::set_finalizers_output_t base_tester::set_active_finalizers(std::span<const account_name> names) {
+      finalizer_policy_input input;
+      input.finalizers.reserve(names.size());
+      for (auto name : names)
+         input.finalizers.emplace_back(name, 1);
+
+      // same as reference-contracts/.../contracts/eosio.system/src/finalizer_key.cpp#L73
+      input.threshold = (names.size() * 2) / 3 + 1;
+      return set_finalizers(input);
+   }
 
    const table_id_object* base_tester::find_table( name code, name scope, name table ) {
       auto tid = control->db().find<table_id_object, by_code_scope_table>(boost::make_tuple(code, scope, table));
       return tid;
    }
 
-   void base_tester::schedule_protocol_features_wo_preactivation(const vector<digest_type> feature_digests) {
+   void base_tester::schedule_protocol_features_wo_preactivation(const vector<digest_type>& feature_digests) {
       protocol_features_to_be_activated_wo_preactivation.insert(
          protocol_features_to_be_activated_wo_preactivation.end(),
          feature_digests.begin(),
@@ -1183,19 +1380,51 @@ namespace eosio { namespace testing {
       );
    }
 
-   void base_tester::preactivate_protocol_features(const vector<digest_type> feature_digests) {
+   void base_tester::preactivate_protocol_features(const vector<digest_type>& feature_digests) {
       for( const auto& feature_digest: feature_digests ) {
          push_action( config::system_account_name, "activate"_n, config::system_account_name,
                       fc::mutable_variant_object()("feature_digest", feature_digest) );
       }
    }
 
+   void base_tester::preactivate_savanna_protocol_features() {
+      const auto& pfm = control->get_protocol_feature_manager();
+
+      // dependencies of builtin_protocol_feature_t::savanna
+      vector<digest_type> feature_digests;
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::only_link_to_existing_permission));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::replace_deferred));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::no_duplicate_deferred_id));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::fix_linkauth_restriction));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::disallow_empty_producer_schedule));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::restrict_action_to_self));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::only_bill_first_authorizer));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::forward_setcode));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::get_sender));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::ram_restrictions));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::webauthn_key));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::wtmsig_block_signatures));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::action_return_value));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::configurable_wasm_limits));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::blockchain_parameters));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::get_code_hash));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::crypto_primitives));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::get_block_num));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::bls_primitives));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::disable_deferred_trxs_stage_1));
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::disable_deferred_trxs_stage_2));
+      // savanna
+      feature_digests.push_back(*pfm.get_builtin_digest(builtin_protocol_feature_t::savanna));
+
+      preactivate_protocol_features( feature_digests );
+   }
+
    void base_tester::preactivate_builtin_protocol_features(const std::vector<builtin_protocol_feature_t>& builtins) {
       const auto& pfm = control->get_protocol_feature_manager();
       const auto& pfs = pfm.get_protocol_feature_set();
-      const auto current_block_num  =  control->head_block_num() + (control->is_building_block() ? 1 : 0);
+      const auto current_block_num  =  control->head().block_num() + (control->is_building_block() ? 1 : 0);
       const auto current_block_time = ( control->is_building_block() ? control->pending_block_time()
-                                        : control->head_block_time() + fc::milliseconds(config::block_interval_ms) );
+                                        : control->head().block_time() + fc::milliseconds(config::block_interval_ms) );
 
       set<digest_type>    preactivation_set;
       vector<digest_type> preactivations;
@@ -1253,7 +1482,9 @@ namespace eosio { namespace testing {
          // deferred trxs need to be exercised to make sure existing behaviors are
          // maintained. Excluding DISABLE_DEFERRED_TRXS_STAGE_1 and DISABLE_DEFERRED_TRXS_STAGE_2
          // from full protocol feature list such that existing tests can run.
-         if( f ==  builtin_protocol_feature_t::disable_deferred_trxs_stage_1 || f  == builtin_protocol_feature_t::disable_deferred_trxs_stage_2 ) {
+         if(   f == builtin_protocol_feature_t::disable_deferred_trxs_stage_1
+            || f == builtin_protocol_feature_t::disable_deferred_trxs_stage_2
+            || f == builtin_protocol_feature_t::savanna ) { // savanna depends on disable_deferred_trxs_stage_1 & 2
             continue;
          }
 
@@ -1275,6 +1506,23 @@ namespace eosio { namespace testing {
                         });
 
       execute_setup_policy(policy);
+   }
+
+   unique_ptr<controller> validating_tester::create_validating_node(controller::config vcfg, const genesis_state& genesis, bool use_genesis, deep_mind_handler* dmlog) {
+      unique_ptr<controller> validating_node = std::make_unique<controller>(vcfg, make_protocol_feature_set(), genesis.compute_chain_id());
+      validating_node->add_indices();
+
+      if(dmlog)
+      {
+         validating_node->enable_deep_mind(dmlog);
+      }
+      if (use_genesis) {
+         validating_node->startup( [](){}, []() { return false; }, genesis );
+      }
+      else {
+         validating_node->startup( [](){}, []() { return false; } );
+      }
+      return validating_node;
    }
 
    bool fc_exception_message_is::operator()( const fc::exception& ex ) {
@@ -1361,7 +1609,7 @@ namespace eosio { namespace testing {
 
    const std::string mock::webauthn_private_key::_origin = "mock.webauthn.invalid";
    const sha256 mock::webauthn_private_key::_origin_hash = fc::sha256::hash(mock::webauthn_private_key::_origin);
-} }  /// eosio::testing
+}  /// eosio::testing
 
 std::ostream& operator<<( std::ostream& osm, const fc::variant& v ) {
    //fc::json::to_stream( osm, v );

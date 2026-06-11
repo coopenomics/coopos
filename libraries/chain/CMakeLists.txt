@@ -38,15 +38,6 @@ if("eos-vm-oc" IN_LIST EOSIO_WASM_RUNTIMES)
    set_source_files_properties(webassembly/runtimes/eos-vm-oc/LLVMEmitIR.cpp PROPERTIES COMPILE_FLAGS "--std=gnu++17")
    set_source_files_properties(webassembly/runtimes/eos-vm-oc/switch_stack_linux.s PROPERTIES COMPILE_FLAGS "-Wno-unused-command-line-argument")
 
-   if(LLVM_VERSION VERSION_LESS 7.1 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-      enable_language(ASM-LLVMWAR)
-      list(APPEND CHAIN_EOSVMOC_SOURCES webassembly/runtimes/eos-vm-oc/llvmWARshim.llvmwar)
-      set_source_files_properties(webassembly/runtimes/eos-vm-oc/llvmWARshim.llvmwar PROPERTIES COMPILE_FLAGS "--std=gnu++17")
-   else()
-      list(APPEND CHAIN_EOSVMOC_SOURCES webassembly/runtimes/eos-vm-oc/llvmWARshim.cpp)
-      set_source_files_properties(webassembly/runtimes/eos-vm-oc/llvmWARshim.cpp PROPERTIES COMPILE_FLAGS "--std=gnu++17")
-   endif()
-
    llvm_map_components_to_libnames(LLVM_LIBS support core passes mcjit native orcjit)
    include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
    add_definitions(${LLVM_DEFINITIONS})
@@ -83,14 +74,19 @@ target_include_directories(eosio_rapidjson INTERFACE ../rapidjson/include)
 
 ## SORT .cpp by most likely to change / break compile
 add_library( eosio_chain
-             merkle.cpp
              name.cpp
              transaction.cpp
              block.cpp
+             block_handle.cpp
              block_header.cpp
+             block_header_state.cpp
+             block_state.cpp
              block_header_state_legacy.cpp
              block_state_legacy.cpp
+             finalizer.cpp
              fork_database.cpp
+             qc.cpp
+             finality_core.cpp
              controller.cpp
              authorization_manager.cpp
              resource_limits.cpp
@@ -133,14 +129,17 @@ add_library( eosio_chain
              symbol.cpp
              whitelisted_intrinsics.cpp
              thread_utils.cpp
+             peer_keys_db.cpp
              platform_timer_accuracy.cpp
              ${PLATFORM_TIMER_IMPL}
              ${HEADERS}
              )
 
+
 ## Boost::accumulators depends on Boost::numeric_ublas, which is still missing cmake support (see
 ## https://github.com/boostorg/cmake/issues/39). Until this is fixed, manually add Boost::numeric_ublas
 ## as an interface library
+##        ** Remove the two lines below when upgrading to Boost 1.86 or above **
 ## ----------------------------------------------------------------------------------------------------
 add_library(boost_numeric_ublas INTERFACE)
 add_library(Boost::numeric_ublas ALIAS boost_numeric_ublas)
@@ -148,7 +147,7 @@ add_library(Boost::numeric_ublas ALIAS boost_numeric_ublas)
 target_link_libraries( eosio_chain PUBLIC bn256 fc chainbase eosio_rapidjson Logging IR WAST WASM
                        softfloat builtins ${CHAIN_EOSVM_LIBRARIES} ${LLVM_LIBS} ${CHAIN_RT_LINKAGE}
                        Boost::signals2 Boost::hana Boost::property_tree Boost::multi_index Boost::asio Boost::lockfree
-                       Boost::assign Boost::accumulators
+                       Boost::assign Boost::accumulators Boost::rational
                      )
 target_include_directories( eosio_chain
                             PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include"
@@ -167,11 +166,6 @@ foreach(RUNTIME ${EOSIO_WASM_RUNTIMES})
    string(REPLACE "-" "_" RUNTIMEUC ${RUNTIMEUC})
    target_compile_definitions(eosio_chain PUBLIC "EOSIO_${RUNTIMEUC}_RUNTIME_ENABLED")
 endforeach()
-
-if(EOSVMOC_ENABLE_DEVELOPER_OPTIONS)
-   message(WARNING "EOS VM OC Developer Options are enabled; these are NOT supported")
-   target_compile_definitions(eosio_chain PUBLIC EOSIO_EOS_VM_OC_DEVELOPER)
-endif()
 
 install( TARGETS eosio_chain
    RUNTIME DESTINATION ${CMAKE_INSTALL_FULL_BINDIR} COMPONENT dev EXCLUDE_FROM_ALL

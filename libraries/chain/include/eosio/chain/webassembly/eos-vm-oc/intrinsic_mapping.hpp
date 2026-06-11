@@ -279,6 +279,8 @@ inline constexpr auto get_intrinsic_table() {
       "env.bls_fp_mod",
       "env.bls_fp_mul",
       "env.bls_fp_exp",
+      "env.set_finalizers",
+      "eosvmoc_internal.check_memcpy_params",
       "env.assert_recover_key_account"
    );
 }

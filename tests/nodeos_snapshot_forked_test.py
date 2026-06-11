@@ -20,7 +20,7 @@ from TestHarness.Node import BlockType
 Print=Utils.Print
 errorExit=Utils.errorExit
 
-args = TestHelper.parse_args({"--prod-count","--dump-error-details","--keep-logs","-v","--leave-running",
+args = TestHelper.parse_args({"--prod-count","--activate-if","--dump-error-details","--keep-logs","-v","--leave-running",
                               "--wallet-port","--unshared"})
 Utils.Debug=args.v
 totalProducerNodes=2
@@ -29,6 +29,7 @@ totalNodes=totalProducerNodes+totalNonProducerNodes
 maxActiveProducers=3
 totalProducers=maxActiveProducers
 cluster=Cluster(unshared=args.unshared, keepRunning=args.leave_running, keepLogs=args.keep_logs)
+activateIF=args.activate_if
 dumpErrorDetails=args.dump_error_details
 walletPort=args.wallet_port
 
@@ -73,6 +74,7 @@ try:
     extraNodeosArgs=" --transaction-finality-status-max-storage-size-gb 1 " + \
                    f"--transaction-finality-status-success-duration-sec {successDuration} --transaction-finality-status-failure-duration-sec {failure_duration}"
     extraNodeosArgs+=" --http-max-response-time-ms 990000"
+    extraNodeosArgs+=" --production-pause-vote-timeout-ms 0"
 
 
     # ***   setup topogrophy   ***
@@ -81,6 +83,7 @@ try:
     # and the only connection between those 2 groups is through the bridge node
     if cluster.launch(prodCount=2, topo="bridge", pnodes=totalProducerNodes,
                       totalNodes=totalNodes, totalProducers=totalProducers,
+                      activateIF=activateIF, biosFinalizer=False,
                       specificExtraNodeosArgs=specificExtraNodeosArgs,
                       extraNodeosArgs=extraNodeosArgs) is False:
         Utils.cmdError("launcher")
@@ -143,7 +146,7 @@ try:
     while nonProdNode.verifyAlive() and count > 0:
         # wait on prodNode 0 since it will continue to advance, since defproducera and defproducerb are its producers
         Print("Wait for next block")
-        assert prodAB.waitForNextBlock(timeout=6), "Production node AB should continue to advance, even after bridge node is killed"
+        assert prodAB.waitForNextBlock(timeout=10), "Production node AB should continue to advance, even after bridge node is killed"
         count -= 1
    
     # schedule a snapshot that should get finalized

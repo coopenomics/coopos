@@ -14,7 +14,7 @@
 
 using boost::container::flat_set;
 
-namespace eosio { namespace chain {
+namespace eosio::chain {
 
 static inline void print_debug(account_name receiver, const action_trace& ar) {
    if (!ar.console.empty()) {
@@ -134,13 +134,7 @@ void apply_context::exec_one()
       } FC_RETHROW_EXCEPTIONS( warn, "${receiver} <= ${account}::${action} pending console output: ${console}", ("console", _pending_console_output)("account", act->account)("action", act->name)("receiver", receiver) )
 
       if( control.is_builtin_activated( builtin_protocol_feature_t::action_return_value ) ) {
-         act_digest =   generate_action_digest(
-                           [this](const char* data, uint32_t datalen) {
-                              return trx_context.hash_with_checktime<digest_type>(data, datalen);
-                           },
-                           *act,
-                           action_return_value
-                        );
+         act_digest = generate_action_digest(*act, action_return_value);
       } else {
          act_digest = digest_type::hash(*act);
       }
@@ -184,7 +178,7 @@ void apply_context::exec_one()
       r.auth_sequence[auth.actor] = next_auth_sequence( auth.actor );
    }
 
-   trx_context.executed_action_receipt_digests.emplace_back( r.digest() );
+   trx_context.executed_action_receipts.compute_and_append_digests_from(trace);
 
    finalize_trace( trace, start );
 
@@ -218,17 +212,17 @@ void apply_context::exec()
       exec_one();
    }
 
-   if( _cfa_inline_actions.size() > 0 || _inline_actions.size() > 0 ) {
+   if( !_cfa_inline_actions.empty() || !_inline_actions.empty() ) {
       EOS_ASSERT( recurse_depth < control.get_global_properties().configuration.max_inline_action_depth,
                   transaction_exception, "max inline action depth per transaction reached" );
-   }
 
-   for( uint32_t ordinal : _cfa_inline_actions ) {
-      trx_context.execute_action( ordinal, recurse_depth + 1 );
-   }
+      for( uint32_t ordinal : _cfa_inline_actions ) {
+         trx_context.execute_action( ordinal, recurse_depth + 1 );
+      }
 
-   for( uint32_t ordinal : _inline_actions ) {
-      trx_context.execute_action( ordinal, recurse_depth + 1 );
+      for( uint32_t ordinal : _inline_actions ) {
+         trx_context.execute_action( ordinal, recurse_depth + 1 );
+      }
    }
 
 } /// exec()
@@ -438,7 +432,7 @@ void apply_context::schedule_deferred_transaction( const uint128_t& sender_id, a
    if( control.is_builtin_activated( builtin_protocol_feature_t::no_duplicate_deferred_id ) ) {
       auto exts = trx.validate_and_extract_extensions();
       if( exts.size() > 0 ) {
-         auto itr = exts.lower_bound( deferred_transaction_generation_context::extension_id() );
+         auto itr = exts.find( deferred_transaction_generation_context::extension_id() );
 
          EOS_ASSERT( exts.size() == 1 && itr != exts.end(), invalid_transaction_extension,
                      "only the deferred_transaction_generation_context extension is currently supported for deferred transactions"
@@ -470,7 +464,7 @@ void apply_context::schedule_deferred_transaction( const uint128_t& sender_id, a
       trx.ref_block_prefix = 0;
    } else {
       trx.expiration = time_point_sec{control.pending_block_time() + fc::microseconds(999'999)}; // Rounds up to nearest second (makes expiration check unnecessary)
-      trx.set_reference_block(control.head_block_id()); // No TaPoS check necessary
+      trx.set_reference_block(control.head().id()); // No TaPoS check necessary
    }
 
    // Charge ahead of time for the additional net usage needed to retire the deferred transaction
@@ -1090,19 +1084,24 @@ action_name apply_context::get_sender() const {
    return action_name();
 }
 
+bool apply_context::is_eos_vm_oc_whitelisted() const {
+   return receiver.prefix() == config::system_account_name || // "eosio"_n
+          control.is_eos_vm_oc_whitelisted(receiver);
+}
+
 // Context             |    OC?
 //-------------------------------------------------------------------------------
-// Building block      | baseline, OC for eosio.*
-// Applying block      | OC unless a producer, OC for eosio.* including producers
-// Speculative API trx | baseline, OC for eosio.*
-// Speculative P2P trx | baseline, OC for eosio.*
-// Compute trx         | baseline, OC for eosio.*
+// Building block      | baseline, OC for whitelisted
+// Applying block      | OC unless a producer, OC for whitelisted including producers
+// Speculative API trx | baseline, OC for whitelisted
+// Speculative P2P trx | baseline, OC for whitelisted
+// Compute trx         | baseline, OC for whitelisted
 // Read only trx       | OC
 bool apply_context::should_use_eos_vm_oc()const {
-   return receiver.prefix() == config::system_account_name // "eosio"_n, all cases use OC
+   return is_eos_vm_oc_whitelisted() // all whitelisted accounts use OC always
           || (is_applying_block() && !control.is_producer_node()) // validating/applying block
           || trx_context.is_read_only();
 }
 
 
-} } /// eosio::chain
+} /// eosio::chain

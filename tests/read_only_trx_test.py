@@ -26,10 +26,10 @@ appArgs=AppArgs()
 appArgs.add(flag="--read-only-threads", type=int, help="number of read-only threads", default=0)
 appArgs.add(flag="--num-test-runs", type=int, help="number of times to run the tests", default=1)
 appArgs.add(flag="--eos-vm-oc-enable", type=str, help="specify eos-vm-oc-enable option", default="auto")
-appArgs.add(flag="--wasm-runtime", type=str, help="if set to eos-vm-oc, must compile with EOSIO_EOS_VM_OC_DEVELOPER", default="eos-vm-jit")
+appArgs.add(flag="--wasm-runtime", type=str, help="if wanting eos-vm-oc, must use 'eos-vm-oc-forced'", default="eos-vm-jit")
 
 args=TestHelper.parse_args({"-p","-n","-d","-s","--nodes-file","--seed"
-                            ,"--dump-error-details","-v","--leave-running"
+                            ,"--activate-if","--dump-error-details","-v","--leave-running"
                             ,"--keep-logs","--unshared"}, applicationSpecificArgs=appArgs)
 
 pnodes=args.p
@@ -44,6 +44,7 @@ debug=args.v
 nodesFile=args.nodes_file
 dontLaunch=nodesFile is not None
 seed=args.seed
+activateIF=args.activate_if
 dumpErrorDetails=args.dump_error_details
 numTestRuns=args.num_test_runs
 
@@ -107,7 +108,7 @@ def startCluster():
     specificExtraNodeosArgs[pnodes]+=" --read-only-write-window-time-us "
     specificExtraNodeosArgs[pnodes]+=" 10000 "
     specificExtraNodeosArgs[pnodes]+=" --read-only-read-window-time-us "
-    specificExtraNodeosArgs[pnodes]+=" 490000 "
+    specificExtraNodeosArgs[pnodes]+=" 510000 " # larger than block time to test Spring Issue #1286
     specificExtraNodeosArgs[pnodes]+=" --eos-vm-oc-cache-size-mb "
     specificExtraNodeosArgs[pnodes]+=" 1 " # set small so there is churn
     specificExtraNodeosArgs[pnodes]+=" --read-only-threads "
@@ -122,7 +123,7 @@ def startCluster():
         specificExtraNodeosArgs[pnodes]+=" --wasm-runtime "
         specificExtraNodeosArgs[pnodes]+=args.wasm_runtime
     extraNodeosArgs=" --http-max-response-time-ms 990000 --disable-subjective-api-billing false "
-    if cluster.launch(pnodes=pnodes, totalNodes=total_nodes, topo=topo, delay=delay, specificExtraNodeosArgs=specificExtraNodeosArgs, extraNodeosArgs=extraNodeosArgs ) is False:
+    if cluster.launch(pnodes=pnodes, totalNodes=total_nodes, topo=topo, delay=delay, activateIF=activateIF, specificExtraNodeosArgs=specificExtraNodeosArgs, extraNodeosArgs=extraNodeosArgs ) is False:
         errorExit("Failed to stand up eos cluster.")
 
     Print ("Wait for Cluster stabilization")
@@ -209,6 +210,9 @@ def sendReadOnlyPayloadless():
 def sendReadOnlySlowPayloadless():
     return sendTransaction('payloadless', action='doitslow', data={}, auth=[], opts='--read')
 
+def sendReadOnlyForeverPayloadless():
+    return sendTransaction('payloadless', action='doitforever', data={}, auth=[], opts='--read')
+
 # Send read-only trxs from mutltiple threads to bump load
 def sendReadOnlyTrxOnThread(startId, numTrxs):
     Print("start sendReadOnlyTrxOnThread")
@@ -282,7 +286,7 @@ def runReadOnlyTrxAndRpcInParallel(resource, command, fieldIn=None, expectedValu
 def mixedOpsTest(opt=None):
     Print("mixedOpsTest -- opt = ", opt)
 
-    numRuns = 200
+    numRuns = 100
     readOnlyThread = threading.Thread(target = sendReadOnlyTrxOnThread, args = (0, numRuns ))
     readOnlyThread.start()
     sendTrxThread = threading.Thread(target = sendTrxsOnThread, args = (numRuns, numRuns, opt))
@@ -372,6 +376,61 @@ def runEverythingParallel():
     for thr in threadList:
         thr.join()
 
+def fastTransactions():
+    Print("fastTransactions")
+    for i in range(1000):
+        result = sendReadOnlyPayloadless()
+        assert(result[0])
+
+def slowTransactions():
+    Print("slowTransactions")
+    for i in range(100):  # run fewer number than regular Payloadless so total running time is close
+        result = sendReadOnlySlowPayloadless()
+        assert(result[0])
+
+def foreverTransactions():
+    Print("foreverTransactions")
+    for i in range(5): # run fewer number than slowPayloadless so total running time is close
+        result = sendReadOnlyForeverPayloadless()
+        assert(result[0] == False) # should fail
+
+def timeoutTest():
+    Print("timeoutTest")
+
+    # Send a forever readonly transaction. It should timeout
+    Print("Sending a forever read only transaction")
+    results = sendReadOnlyForeverPayloadless()
+    # Results look like
+    '''
+    ( False,
+      {'processed':
+        {
+          ...
+          'except': {'code': 3080004, 'name': 'tx_cpu_usage_exceeded', 'message': 'Transaction exceeded the current CPU usage limit imposed on the transaction' ...}
+          ...
+         }
+      }
+    )
+    '''
+    if Utils.Debug: Utils.Print(f"result: {results}")
+    assert(results[0] == False)
+    assert('except' in results[1]['processed'])
+    assert(results[1]['processed']['except']['code'] == 3080004)
+    assert(results[1]['processed']['except']['name'] == "tx_cpu_usage_exceeded")
+
+    # Send multiple different speeds of read only transactions simutaneously
+    # to trigger forever transactions are exhausted in read window but RETRYING
+    # at next round.
+    threadList = []
+    threadList.append(threading.Thread(target = fastTransactions))
+    threadList.append(threading.Thread(target = slowTransactions))
+    threadList.append(threading.Thread(target = foreverTransactions))
+    Print("Sending different speeds of read only transactions simutaneously")
+    for thr in threadList:
+        thr.start()
+    for thr in threadList:
+        thr.join()
+
 try:
     startCluster()
     deployTestContracts()
@@ -385,6 +444,9 @@ try:
             netApiTests()
             mixedOpsTest()
             runEverythingParallel()
+
+        # should be running under multiple threads but no need to run multiple times
+        timeoutTest()
 
     testSuccessful = True
 finally:

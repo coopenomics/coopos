@@ -1,6 +1,7 @@
 #include <eosio/chain/abi_serializer.hpp>
 #include <eosio/chain/asset.hpp>
 #include <eosio/chain/exceptions.hpp>
+#include <eosio/chain/finality_extension.hpp>
 #include <fc/io/raw.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <fc/io/varint.hpp>
@@ -414,8 +415,8 @@ namespace eosio { namespace chain {
          try {
             fc::raw::unpack(stream, size);
          } EOS_RETHROW_EXCEPTIONS( unpack_exception, "Unable to unpack size of array '${p}'", ("p", ctx.get_path_string()) )
-         vector<fc::variant> vars;
-         vars.reserve(size);
+         fc::variants vars;
+         vars.reserve(std::min(size.value, 1024u)); // limit the maximum size that can be reserved before data is read
          auto h1 = ctx.push_to_path( impl::array_index_path_item{} );
          for( decltype(size.value) i = 0; i < size; ++i ) {
             ctx.set_array_index_of_path_back(i);
@@ -447,7 +448,7 @@ namespace eosio { namespace chain {
             EOS_ASSERT( (size_t)select < v_itr->second.types.size(), unpack_exception,
                         "Unpacked invalid tag (${select}) for variant '${p}'", ("select", select.value)("p",ctx.get_path_string()) );
             auto h1 = ctx.push_to_path( impl::variant_path_item{ .variant_itr = v_itr, .variant_ordinal = static_cast<uint32_t>(select) } );
-            return vector<fc::variant>{v_itr->second.types[select], _binary_to_variant(v_itr->second.types[select], stream, ctx)};
+            return fc::variants{v_itr->second.types[select], _binary_to_variant(v_itr->second.types[select], stream, ctx)};
          }
       }
 
@@ -502,7 +503,7 @@ namespace eosio { namespace chain {
          btype->second.second(var, ds, is_array(rtype), is_optional(rtype), ctx.get_yield_function());
       } else if ( is_array(rtype) ) {
          ctx.hint_array_type_if_in_array();
-         const vector<fc::variant>& vars = var.get_array();
+         const fc::variants& vars = var.get_array();
          fc::raw::pack(ds, (fc::unsigned_int)vars.size());
 
          auto h1 = ctx.push_to_path( impl::array_index_path_item{} );
@@ -631,6 +632,13 @@ namespace eosio { namespace chain {
       impl::variant_to_binary_context ctx(*this, create_depth_yield_function(), max_action_data_serialization_time, type);
       ctx.short_path = short_path;
       _variant_to_binary(type, var, ds, ctx);
+   }
+
+   void impl::abi_to_variant::add_block_header_finality_extension( mutable_variant_object& mvo, const header_extension_multimap& header_exts ) {
+      if (auto it = header_exts.find(finality_extension::extension_id()); it != header_exts.end()) {
+         const auto& f_ext = std::get<finality_extension>(it->second);
+         mvo("finality_extension", f_ext);
+      }
    }
 
    type_name abi_serializer::get_action_type(name action)const {

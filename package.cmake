@@ -39,7 +39,7 @@ string(APPEND CPACK_PACKAGE_FILE_NAME "-${CMAKE_SYSTEM_PROCESSOR}")
 
 set(CPACK_PACKAGE_CONTACT "CBS VOSKHOD")
 set(CPACK_PACKAGE_VENDOR "CBS VOSKHOD")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ implementation of the Coopos protocol")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ implementation of the Coopos protocol with Savanna consensus")
 set(CPACK_COMPONENT_BASE_DESCRIPTION "daemon and CLI tools including ${NODE_EXECUTABLE_NAME}, ${CLI_CLIENT_EXECUTABLE_NAME}, and ${KEY_STORE_EXECUTABLE_NAME}")
 set(CPACK_COMPONENT_DEV_DESCRIPTION "headers and libraries for native contract unit testing")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/coopenomics/coopos")
@@ -51,11 +51,11 @@ set(CPACK_DEBIAN_PACKAGE_CONFLICTS "eosio, mandel, leap")
 set(CPACK_RPM_PACKAGE_CONFLICTS "eosio, mandel, leap")
 
 set(CPACK_COMPONENTS_ALL "base")
-if(ENABLE_LEAP_DEV_DEB)
+if(ENABLE_SPRING_DEV_DEB)
    list(APPEND CPACK_COMPONENTS_ALL "dev")
 endif()
 
-#enable per component packages for .deb; ensure main package is just "leap", not "leap-base", and make the dev package have "leap-dev" at the front not the back
+#enable per component packages for .deb; ensure main package is just "antelope-spring", not "antelope-spring-base", and make the dev package have "antelope-spring-dev" at the front not the back
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_BASE_PACKAGE_NAME "${CMAKE_PROJECT_NAME}")
 set(CPACK_DEBIAN_BASE_FILE_NAME "${CPACK_DEBIAN_FILE_NAME}.deb")

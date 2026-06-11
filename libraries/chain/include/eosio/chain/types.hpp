@@ -74,7 +74,7 @@ namespace eosio::chain {
    using public_key_type  = fc::crypto::public_key;
    using private_key_type = fc::crypto::private_key;
    using signature_type   = fc::crypto::signature;
-   
+
    // configurable boost deque (for boost >= 1.71) performs much better than std::deque in our use cases
    using block_1024_option_t = boost::container::deque_options< boost::container::block_size<1024u> >::type;
    template<typename T>
@@ -244,15 +244,6 @@ namespace eosio::chain {
    using bytes               = vector<char>;
    using digests_t           = deque<digest_type>;
 
-   struct sha256_less {
-      bool operator()( const fc::sha256& lhs, const fc::sha256& rhs ) const {
-       return
-             std::tie(lhs._hash[0], lhs._hash[1], lhs._hash[2], lhs._hash[3]) <
-             std::tie(rhs._hash[0], rhs._hash[1], rhs._hash[2], rhs._hash[3]);
-      }
-   };
-
-
    /**
     *  Extentions are prefixed with type and are a buffer that can be
     *  interpreted by code that is aware and ignored by unaware code.
@@ -403,6 +394,9 @@ namespace eosio::chain {
 
    template<typename T>
    using next_function = std::function<void(const next_function_variant<T>&)>;
+
+   // to configure whether a process should be done asynchronously or not
+   enum class async_t { no, yes };
 
 }  // eosio::chain
 

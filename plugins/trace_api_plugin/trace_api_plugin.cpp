@@ -241,13 +241,8 @@ struct trace_api_rpc_plugin_impl : public std::enable_shared_from_this<trace_api
 
       http.add_async_handler({"/v1/trace_api/get_block",
             api_category::trace_api,
-            [wthis=weak_from_this()](std::string, std::string body, url_response_callback cb)
+            [this](std::string, std::string body, url_response_callback cb)
       {
-         auto that = wthis.lock();
-         if (!that) {
-            return;
-         }
-
          auto block_number = ([&body]() -> std::optional<uint32_t> {
             if (body.empty()) {
                return {};
@@ -273,7 +268,7 @@ struct trace_api_rpc_plugin_impl : public std::enable_shared_from_this<trace_api
 
          try {
 
-            auto resp = that->req_handler->get_block_trace(*block_number);
+            auto resp = req_handler->get_block_trace(*block_number);
             if (resp.is_null()) {
                error_results results{404, "Trace API: block trace missing"};
                cb( 404, fc::variant( results ));
@@ -288,13 +283,8 @@ struct trace_api_rpc_plugin_impl : public std::enable_shared_from_this<trace_api
 
       http.add_async_handler({"/v1/trace_api/get_transaction_trace",
             api_category::trace_api,
-            [wthis=weak_from_this(), this](std::string, std::string body, url_response_callback cb)
+            [this](std::string, std::string body, url_response_callback cb)
       {
-         auto that = wthis.lock();
-         if (!that) {
-            return;
-         }
-
          auto trx_id = ([&body]() -> std::optional<transaction_id_type> {
             if (body.empty()) {
                return {};
@@ -319,12 +309,12 @@ struct trace_api_rpc_plugin_impl : public std::enable_shared_from_this<trace_api
 
          try {
             // search for the block that contains the transaction
-            get_block_n blk_num = common->store->get_trx_block_number(*trx_id, common->minimum_irreversible_history_blocks);
+            get_block_n blk_num = common->store->get_trx_block_number(*trx_id);
             if (!blk_num.has_value()){
                error_results results{404, "Trace API: transaction id missing in the transaction id log files"};
                cb( 404, fc::variant( results ));
             } else {
-               auto resp = that->req_handler->get_transaction_trace(*trx_id, *blk_num);
+               auto resp = req_handler->get_transaction_trace(*trx_id, *blk_num);
                if (resp.is_null()) {
                   error_results results{404, "Trace API: transaction trace missing"};
                   cb( 404, fc::variant( results ));
@@ -363,21 +353,21 @@ struct trace_api_plugin_impl {
       auto& chain = app().find_plugin<chain_plugin>()->chain();
 
       applied_transaction_connection.emplace(
-         chain.applied_transaction.connect([this](std::tuple<const chain::transaction_trace_ptr&, const chain::packed_transaction_ptr&> t) {
+         chain.applied_transaction().connect([this](std::tuple<const chain::transaction_trace_ptr&, const chain::packed_transaction_ptr&> t) {
             emit_killer([&](){
                extraction->signal_applied_transaction(std::get<0>(t), std::get<1>(t));
             });
          }));
 
       block_start_connection.emplace(
-            chain.block_start.connect([this](uint32_t block_num) {
+            chain.block_start().connect([this](uint32_t block_num) {
                emit_killer([&](){
                   extraction->signal_block_start(block_num);
                });
             }));
 
       accepted_block_connection.emplace(
-         chain.accepted_block.connect([this](const chain::block_signal_params& t) {
+         chain.accepted_block().connect([this](const chain::block_signal_params& t) {
             emit_killer([&](){
                const auto& [ block, id ] = t;
                extraction->signal_accepted_block(block, id);
@@ -385,7 +375,7 @@ struct trace_api_plugin_impl {
          }));
 
       irreversible_block_connection.emplace(
-         chain.irreversible_block.connect([this](const chain::block_signal_params& t) {
+         chain.irreversible_block().connect([this](const chain::block_signal_params& t) {
             const auto& [ block, id ] = t;
             emit_killer([&](){
                extraction->signal_irreversible_block(block->block_num());
@@ -443,7 +433,7 @@ void trace_api_plugin::plugin_startup() {
 void trace_api_plugin::plugin_shutdown() {
    my->plugin_shutdown();
    rpc->plugin_shutdown();
-   fc_ilog( _log, "exit shutdown");
+   fc_dlog( _log, "exit shutdown");
 }
 
 void trace_api_plugin::handle_sighup() {

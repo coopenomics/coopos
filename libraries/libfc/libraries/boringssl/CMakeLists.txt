@@ -1,7 +1,14 @@
-add_subdirectory(boringssl EXCLUDE_FROM_ALL)
+add_subdirectory(bssl EXCLUDE_FROM_ALL)
 target_compile_options(fipsmodule PRIVATE -Wno-error)
 target_compile_options(crypto PRIVATE -Wno-error)
 target_compile_options(decrepit PRIVATE -Wno-error)
+
+# boringssl's forced-on debug symbols interfere with reproducibility due to path differences; disable on Release builds
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+   target_compile_options(fipsmodule PRIVATE -g0)
+   target_compile_options(crypto PRIVATE -g0)
+   target_compile_options(decrepit PRIVATE -g0)
+endif()
 
 #paranoia for when a dependent library depends on openssl (such as libcurl)
 set_target_properties(fipsmodule PROPERTIES C_VISIBILITY_PRESET hidden)
@@ -25,4 +32,4 @@ install( TARGETS decrepit
    ARCHIVE DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
 
-install( DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/boringssl/src/include/" DESTINATION "${CMAKE_INSTALL_FULL_INCLUDEDIR}/leapboringssl" COMPONENT dev EXCLUDE_FROM_ALL )
+install( DIRECTORY bssl/include/ DESTINATION "${CMAKE_INSTALL_FULL_INCLUDEDIR}/springboringssl" COMPONENT dev EXCLUDE_FROM_ALL )

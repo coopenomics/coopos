@@ -127,7 +127,7 @@ def getMinHeadAndLib(prodNodes):
 
 appArgs = AppArgs()
 extraArgs = appArgs.add(flag="--num-ship-clients", type=int, help="How many ship_streamers should be started", default=2)
-args = TestHelper.parse_args({"--prod-count","--dump-error-details","--keep-logs","-v","--leave-running",
+args = TestHelper.parse_args({"--prod-count","--activate-if","--dump-error-details","--keep-logs","-v","--leave-running",
                               "--wallet-port","--unshared"}, applicationSpecificArgs=appArgs)
 Utils.Debug=args.v
 totalProducerNodes=2
@@ -135,6 +135,7 @@ totalNonProducerNodes=1
 totalNodes=totalProducerNodes+totalNonProducerNodes
 maxActiveProducers=21
 totalProducers=maxActiveProducers
+activateIF=args.activate_if
 dumpErrorDetails=args.dump_error_details
 prodCount=args.prod_count
 walletPort=args.wallet_port
@@ -158,7 +159,8 @@ try:
 
     # producer nodes will be mapped to 0 through totalProducerNodes-1, so the number totalProducerNodes will be the non-producing node
     specificExtraNodeosArgs[totalProducerNodes]="--plugin eosio::test_control_api_plugin"
-
+    # test expects split network to advance with single producer
+    extraNodeosArgs=" --production-pause-vote-timeout-ms 0 "
 
     # ***   setup topogrophy   ***
 
@@ -166,8 +168,8 @@ try:
     # and the only connection between those 2 groups is through the bridge node
 
     if cluster.launch(prodCount=prodCount, topo="bridge", pnodes=totalProducerNodes,
-                      totalNodes=totalNodes, totalProducers=totalProducers,
-                      specificExtraNodeosArgs=specificExtraNodeosArgs) is False:
+                      totalNodes=totalNodes, totalProducers=totalProducers, activateIF=activateIF, biosFinalizer=False,
+                      specificExtraNodeosArgs=specificExtraNodeosArgs, extraNodeosArgs=extraNodeosArgs) is False:
         Utils.cmdError("launcher")
         Utils.errorExit("Failed to stand up eos cluster.")
     Print("Validating system accounts after bootstrap")
@@ -498,8 +500,8 @@ try:
     Print("Tracking the blocks from the divergence till there are 10*12 blocks on one chain and 10*12+1 on the other, from block %d to %d" % (killBlockNum, lastBlockNum))
 
     for blockNum in range(killBlockNum,lastBlockNum):
-        blockProducer0=prodNodes[0].getBlockProducerByNum(blockNum)
-        blockProducer1=prodNodes[1].getBlockProducerByNum(blockNum)
+        blockProducer0=prodNodes[0].getBlockProducerByNum(blockNum, timeout=70)
+        blockProducer1=prodNodes[1].getBlockProducerByNum(blockNum, timeout=70)
         blockProducers0.append({"blockNum":blockNum, "prod":blockProducer0})
         blockProducers1.append({"blockNum":blockNum, "prod":blockProducer1})
 
@@ -597,11 +599,11 @@ try:
         block_num = start_block_num
         for i in data:
             # fork can cause block numbers to be repeated
-            this_block_num = i['get_blocks_result_v0']['this_block']['block_num']
+            this_block_num = i['get_blocks_result_v1']['this_block']['block_num']
             if this_block_num < block_num:
                 block_num = this_block_num
             assert block_num == this_block_num, f"{block_num} != {this_block_num}"
-            assert isinstance(i['get_blocks_result_v0']['block'], str) # verify block in result
+            assert isinstance(i['get_blocks_result_v1']['block'], str) # verify block in result
             block_num += 1
         assert block_num-1 == end_block_num, f"{block_num-1} != {end_block_num}"
 

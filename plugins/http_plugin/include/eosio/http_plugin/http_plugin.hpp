@@ -68,11 +68,11 @@ namespace eosio {
     *  URL that was requested and a callback method that should be
     *  called with the response code and body.
     *
-    *  The handler will be called from the appbase application io_service
+    *  The handler will be called from the appbase application io_context
     *  thread.  The callback can be called from any thread and will
     *  automatically propagate the call to the http thread.
     *
-    *  The HTTP service will run in its own thread with its own io_service to
+    *  The HTTP service will run in its own thread with its own io_context to
     *  make sure that HTTP request processing does not interfer with other
     *  plugins.
     */
@@ -87,6 +87,7 @@ namespace eosio {
         static std::string get_server_header();
 
         APPBASE_PLUGIN_REQUIRES()
+
         void set_program_options(options_description&, options_description& cfg) override;
 
         void plugin_initialize(const variables_map& options);
@@ -113,6 +114,9 @@ namespace eosio {
 
         bool is_on_loopback(api_category category) const;
 
+        // returns true if `category` is enabled in http_plugin
+        bool is_enabled(api_category category) const;
+
         static bool verbose_errors();
 
         struct get_supported_apis_result {
@@ -129,6 +133,10 @@ namespace eosio {
         };
 
         void register_update_metrics(std::function<void(metrics)>&& fun);
+
+        size_t requests_in_flight() const;
+
+        size_t bytes_in_flight() const;
 
         std::atomic<bool>& listening();
    private:

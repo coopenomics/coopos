@@ -186,6 +186,16 @@ namespace eosio { namespace chain {
       }
 
       template <typename Stream>
+      std::vector<char> read_serialized_block(Stream&& ds, uint64_t block_size) {
+         std::vector<char> buff;
+         buff.resize(block_size);
+
+         ds.read(buff.data(), block_size);
+
+         return buff;
+      }
+
+      template <typename Stream>
       signed_block_header read_block_header(Stream&& ds, uint32_t expect_block_num) {
          signed_block_header bh;
          fc::raw::unpack(ds, bh);
@@ -196,6 +206,7 @@ namespace eosio { namespace chain {
 
          return bh;
       }
+
 
       /// Provide the read only view of the blocks.log file
       class block_log_data : public chain::log_data_base<block_log_data> {
@@ -245,10 +256,12 @@ namespace eosio { namespace chain {
             //   block_id_type        previous;                   //bytes 14:45, low 4 bytes is big endian block number
             //   of previous block
 
-            EOS_ASSERT(position <= size(), block_log_exception, "Invalid block position ${position}",
-                       ("position", position));
+            int blknum_offset = 14;
 
-            int      blknum_offset  = 14;
+            EOS_ASSERT(position + blknum_offset + sizeof(uint32_t) <= size(), block_log_exception,
+                       "Read outside of file: position ${position}, blknum_offset ${o}, file size ${s}",
+                       ("position", position)("o", blknum_offset)("s", size()));
+
             uint32_t prev_block_num = read_data_at<uint32_t>(file, position + blknum_offset);
             return fc::endian_reverse_u32(prev_block_num) + 1;
          }
@@ -485,6 +498,7 @@ namespace eosio { namespace chain {
          virtual void     flush()                                                             = 0;
 
          virtual signed_block_ptr                   read_block_by_num(uint32_t block_num)        = 0;
+         virtual std::vector<char>                  read_serialized_block_by_num(uint32_t block_num) = 0;
          virtual std::optional<signed_block_header> read_block_header_by_num(uint32_t block_num) = 0;
 
          virtual uint32_t version() const = 0;
@@ -496,6 +510,9 @@ namespace eosio { namespace chain {
             else
                head = {};
          }
+
+         static std::optional<block_log_preamble> extract_block_log_preamble(const std::filesystem::path& block_dir,
+                                                                             const std::filesystem::path& retained_dir);
       }; // block_log_impl
 
       /// Would remove pre-existing block log and index, never write blocks into disk.
@@ -518,6 +535,7 @@ namespace eosio { namespace chain {
          void flush() final {}
 
          signed_block_ptr read_block_by_num(uint32_t block_num) final { return {}; };
+         std::vector<char> read_serialized_block_by_num(uint32_t block_num) final { return {}; };
          std::optional<signed_block_header> read_block_header_by_num(uint32_t block_num) final { return {}; };
 
          uint32_t         version() const final { return 0; }
@@ -562,6 +580,7 @@ namespace eosio { namespace chain {
          virtual uint32_t         working_block_file_first_block_num() { return preamble.first_block_num; }
          virtual void             post_append(uint64_t pos) {}
          virtual signed_block_ptr retry_read_block_by_num(uint32_t block_num) { return {}; }
+         virtual std::vector<char> retry_read_serialized_block_by_num(uint32_t block_num) { return {}; }
          virtual std::optional<signed_block_header> retry_read_block_header_by_num(uint32_t block_num) { return {}; }
 
          void append(const signed_block_ptr& b, const block_id_type& id,
@@ -578,7 +597,7 @@ namespace eosio { namespace chain {
                uint64_t pos = block_file.tellp();
 
                EOS_ASSERT(index_file.tellp() == sizeof(uint64_t) * (b->block_num() - preamble.first_block_num),
-                          block_log_append_fail, "Append to index file occuring at wrong position.",
+                          block_log_append_fail, "Append to index file occurring at wrong position.",
                           ("position", (uint64_t)index_file.tellp())(
                                 "expected", (b->block_num() - preamble.first_block_num) * sizeof(uint64_t)));
                block_file.write(packed_block.data(), packed_block.size());
@@ -603,14 +622,67 @@ namespace eosio { namespace chain {
             return pos;
          }
 
+         block_pos_size_t get_block_position_and_size(uint32_t block_num) {
+            uint64_t pos = get_block_pos(block_num);
+
+            if (pos == block_log::npos) {
+               return block_pos_size_t {.position = block_log::npos, .size = 0};
+            }
+
+            assert(head);
+            uint32_t last_block_num = block_header::num_from_id(head->id);
+            EOS_ASSERT(block_num <= last_block_num, block_log_exception,
+                       "block_num ${bn} should not be greater than last_block_num ${lbn}",
+                       ("bn", block_num)("lbn", last_block_num));
+
+            uint64_t block_size = 0;
+            constexpr uint32_t block_pos_size = sizeof(uint64_t); // size of block position field in the block log file
+
+            if (block_num < last_block_num) {
+               // current block is not the last block in the log file.
+               uint64_t next_block_pos = get_block_pos(block_num + 1);
+
+               EOS_ASSERT(next_block_pos > pos + block_pos_size, block_log_exception,
+                          "next block position ${np} should be greater than current block position ${p} plus block position field size ${bps}",
+                          ("np", next_block_pos)("p", pos)("bps", block_pos_size));
+
+               block_size = next_block_pos - pos - block_pos_size;
+            } else {
+               // current block is the last block in the file.
+
+               block_file.seek_end(0);
+               auto file_size = block_file.tellp();
+               EOS_ASSERT(file_size > pos + block_pos_size, block_log_exception,
+                          "block log file size ${fs} should be greater than current block position ${p} plus block position field size ${bps}",
+                          ("fs", file_size)("p", pos)("bps", block_pos_size));
+
+               block_size = file_size - pos - block_pos_size;
+            }
+
+            return block_pos_size_t {.position = pos, .size = block_size};
+         }
+
          signed_block_ptr read_block_by_num(uint32_t block_num) final {
             try {
-               uint64_t pos = get_block_pos(block_num);
+               auto [ pos, size ] = get_block_position_and_size(block_num);
                if (pos != block_log::npos) {
                   block_file.seek(pos);
-                  return read_block(block_file, block_num);
+                  fc::datastream_mirror ds(block_file, size);
+                  return read_block(ds, block_num);
                }
                return retry_read_block_by_num(block_num);
+            }
+            FC_LOG_AND_RETHROW()
+         }
+
+         std::vector<char> read_serialized_block_by_num(uint32_t block_num) final {
+            try {
+               auto [ position, size ] = get_block_position_and_size(block_num);
+               if (position != block_log::npos) {
+                  block_file.seek(position);
+                  return read_serialized_block(block_file, size);
+               }
+               return retry_read_serialized_block_by_num(block_num);
             }
             FC_LOG_AND_RETHROW()
          }
@@ -670,10 +742,10 @@ namespace eosio { namespace chain {
                ilog("Log has ${n} blocks", ("n", number_of_blocks));
 
                EOS_ASSERT(index_size || number_of_blocks == 0, block_log_exception,
-                          "${index_file} file is empty, please use leap-util to fix the problem.",
+                          "${index_file} file is empty, please use spring-util to fix the problem.",
                           ("index_file", index_file.get_file_path().string()));
                EOS_ASSERT(index_size % sizeof(uint64_t) == 0, block_log_exception,
-                          "${index_file} file is invalid, please use leap-util to reconstruct the index.",
+                          "${index_file} file is invalid, please use spring-util to reconstruct the index.",
                           ("index_file", index_file.get_file_path().string()));
 
                if (index_size) {
@@ -684,7 +756,7 @@ namespace eosio { namespace chain {
                   EOS_ASSERT(last_block_pos == last_index_pos, block_log_exception,
                              "The last block position from ${block_file} is at ${block_pos} "
                              "which does not match the last block postion ${index_pos} from ${index_file}, please use "
-                             "leap-util to fix the inconsistency.",
+                             "spring-util to fix the inconsistency.",
                              ("block_pos", last_block_pos)("index_pos", last_index_pos)
                              ("block_file", block_file.get_file_path().string())
                              ("index_file", index_file.get_file_path().string()));
@@ -733,7 +805,7 @@ namespace eosio { namespace chain {
 
          void reset(const genesis_state& gs, const signed_block_ptr& first_block) override {
             this->reset(1, gs, default_initial_version);
-            this->append(first_block, first_block->calculate_id(), fc::raw::pack(*first_block));
+            this->append(first_block, first_block->calculate_id(), first_block->packed_signed_block());
          }
 
          void reset(const chain_id_type& chain_id, uint32_t first_block_num) override {
@@ -956,7 +1028,7 @@ namespace eosio { namespace chain {
             open(log_dir);
             const auto log_size = std::filesystem::file_size(block_file.get_file_path());
 
-            if (log_size == 0 && !catalog.empty()) {
+            if ((log_size == 0 || !head) && !catalog.empty()) {
                basic_block_log::reset(catalog.verifier.chain_id, catalog.last_block_num() + 1);
                update_head(read_block_by_num(catalog.last_block_num()));
             } else {
@@ -1026,9 +1098,23 @@ namespace eosio { namespace chain {
          }
 
          signed_block_ptr retry_read_block_by_num(uint32_t block_num) final {
-            auto ds = catalog.ro_stream_for_block(block_num);
-            if (ds)
-               return read_block(*ds, block_num);
+            uint64_t block_size = 0;
+
+            auto ds = catalog.ro_stream_and_size_for_block(block_num, block_size);
+            if (ds) {
+               fc::datastream_mirror dsm(*ds, block_size);
+               return read_block(dsm, block_num);
+            }
+            return {};
+         }
+
+         std::vector<char> retry_read_serialized_block_by_num(uint32_t block_num) final {
+            uint64_t block_size = 0;
+
+            auto ds = catalog.ro_stream_and_size_for_block(block_num, block_size);
+            if (ds) {
+               return read_serialized_block(*ds, block_size);
+            }
             return {};
          }
 
@@ -1079,6 +1165,7 @@ namespace eosio { namespace chain {
             // convert from  non-pruned block log to pruned if necessary
             if (!preamble.is_currently_pruned()) {
                block_file.open(fc::cfile::update_rw_mode);
+               index_file.open(fc::cfile::update_rw_mode);
                update_head(read_head());
                first_block_number = preamble.first_block_num;
                // need to convert non-pruned log to pruned log. prune any blocks to start with
@@ -1199,9 +1286,8 @@ namespace eosio { namespace chain {
    }
 
    void block_log::append(const signed_block_ptr& b, const block_id_type& id) {
-      std::vector<char> packed_block = fc::raw::pack(*b);
       std::lock_guard g(my->mtx);
-      my->append(b, id, packed_block);
+      my->append(b, id, b->packed_signed_block());
    }
 
    void block_log::append(const signed_block_ptr& b, const block_id_type& id, const std::vector<char>& packed_block) {
@@ -1230,15 +1316,21 @@ namespace eosio { namespace chain {
       return my->read_block_by_num(block_num);
    }
 
+   std::vector<char> block_log::read_serialized_block_by_num(uint32_t block_num) const {
+      std::lock_guard g(my->mtx);
+      return my->read_serialized_block_by_num(block_num);
+   }
+
    std::optional<signed_block_header> block_log::read_block_header_by_num(uint32_t block_num) const {
       std::lock_guard g(my->mtx);
       return my->read_block_header_by_num(block_num);
    }
 
-   block_id_type block_log::read_block_id_by_num(uint32_t block_num) const {
+   std::optional<block_id_type> block_log::read_block_id_by_num(uint32_t block_num) const {
       // read_block_header_by_num acquires mutex
       auto bh = read_block_header_by_num(block_num);
-      if (bh) { return bh->calculate_id(); }
+      if (bh)
+         return std::optional<block_id_type>{bh->calculate_id()};
       return {};
    }
 
@@ -1375,8 +1467,8 @@ namespace eosio { namespace chain {
    }
 
    // static
-   std::optional<block_log::chain_context> block_log::extract_chain_context(const std::filesystem::path& block_dir,
-                                                                            const std::filesystem::path& retained_dir) {
+   std::optional<block_log_preamble> detail::block_log_impl::extract_block_log_preamble(const std::filesystem::path& block_dir,
+                                                                                        const std::filesystem::path& retained_dir) {
       std::filesystem::path first_block_file;
       if (!retained_dir.empty() && std::filesystem::exists(retained_dir)) {
          for_each_file_in_dir_matches(retained_dir, R"(blocks-1-\d+\.log)",
@@ -1390,9 +1482,9 @@ namespace eosio { namespace chain {
       }
 
       if (!first_block_file.empty()) {
-         return block_log_data(first_block_file).get_preamble().chain_context;
+         return block_log_data(first_block_file).get_preamble();
       }
-      
+
       if (!retained_dir.empty() && std::filesystem::exists(retained_dir)) {
          const std::regex        my_filter(R"(blocks-\d+-\d+\.log)");
          std::smatch             what;
@@ -1405,8 +1497,18 @@ namespace eosio { namespace chain {
             std::string file = p->path().filename().string();
             if (!std::regex_match(file, what, my_filter))
                continue;
-            return block_log_data(p->path()).chain_id();
+            return block_log_data(p->path()).get_preamble();
          }
+      }
+      return {};
+   }
+
+   // static
+   std::optional<block_log::chain_context> block_log::extract_chain_context(const std::filesystem::path& block_dir,
+                                                                            const std::filesystem::path& retained_dir) {
+      auto preamble = detail::block_log_impl::extract_block_log_preamble(block_dir, retained_dir);
+      if (preamble) {
+         return preamble->chain_context;
       }
       return {};
    }
@@ -1430,6 +1532,16 @@ namespace eosio { namespace chain {
          [](const chain_id_type& id){ return id; },
          [](const genesis_state& gs){ return gs.compute_chain_id(); }
           } , *context);
+   }
+
+   // static
+   uint32_t block_log::extract_first_block_num(const std::filesystem::path& block_dir,
+                                               const std::filesystem::path& retained_dir) {
+      auto preamble = detail::block_log_impl::extract_block_log_preamble(block_dir, retained_dir);
+      if (preamble) {
+         return preamble->first_block_num;
+      }
+      return 0;
    }
 
    // static

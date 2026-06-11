@@ -61,7 +61,7 @@ class Utils:
     EosClientPath=str(testBinPath / "cleos")
     MiscEosClientArgs="--no-auto-keosd"
 
-    LeapClientPath=str(testBinPath / "leap-util")
+    SpringClientPath=str(testBinPath / "spring-util")
 
     EosWalletName="keosd"
     EosWalletPath=str(testBinPath / EosWalletName)
@@ -88,12 +88,8 @@ class Utils:
     @staticmethod
     def checkOutputFileWrite(time, cmd, output, error):
         stop=Utils.timestamp()
-        if not os.path.isdir(Utils.TestLogRoot):
-            if Utils.Debug: Utils.Print("TestLogRoot creating dir %s in dir: %s" % (Utils.TestLogRoot, os.getcwd()))
-            os.mkdir(Utils.TestLogRoot)
-        if not os.path.isdir(Utils.DataPath):
-            if Utils.Debug: Utils.Print("DataPath creating dir %s in dir: %s" % (Utils.DataPath, os.getcwd()))
-            os.mkdir(Utils.DataPath)
+        os.makedirs(Utils.TestLogRoot, exist_ok=True)
+        os.makedirs(Utils.DataPath, exist_ok=True)
         if not hasattr(Utils, "checkOutputFile"):
             Utils.checkOutputFilename=f"{Utils.DataPath}/subprocess_results.log"
             if Utils.Debug: Utils.Print("opening %s in dir: %s" % (Utils.checkOutputFilename, os.getcwd()))
@@ -159,15 +155,6 @@ class Utils:
         if trailingSlash:
            path=os.path.join(path, "")
         return path
-
-    @staticmethod
-    def rmNodeDataDir(ext, rmState=True, rmBlocks=True, rmStateHist=True):
-        if rmState:
-            shutil.rmtree(Utils.getNodeDataDir(ext, "state"))
-        if rmBlocks:
-            shutil.rmtree(Utils.getNodeDataDir(ext, "blocks"))
-        if rmStateHist:
-            shutil.rmtree(Utils.getNodeDataDir(ext, "state-history"), ignore_errors=True)
 
     @staticmethod
     def getNodeConfigDir(ext, relativeDir=None, trailingSlash=False):
@@ -317,7 +304,7 @@ class Utils:
     @staticmethod
     def runCmdArrReturnJson(cmdArr, trace=False, silentErrors=True):
         retStr=Utils.checkOutput(cmdArr)
-        return Utils.toJson(retStr)
+        return Utils.toJson(retStr, trace, silentErrors)
 
     @staticmethod
     def runCmdReturnStr(cmd, trace=False, ignoreError=False):
@@ -336,8 +323,8 @@ class Utils:
         return Utils.runCmdArrReturnJson(cmdArr, trace=trace, silentErrors=silentErrors)
 
     @staticmethod
-    def processLeapUtilCmd(cmd, cmdDesc, silentErrors=True, exitOnError=False, exitMsg=None):
-        cmd="%s %s" % (Utils.LeapClientPath, cmd)
+    def processSpringUtilCmd(cmd, cmdDesc, silentErrors=True, exitOnError=False, exitMsg=None):
+        cmd="%s %s" % (Utils.SpringClientPath, cmd)
         if Utils.Debug: Utils.Print("cmd: %s" % (cmd))
         if exitMsg is not None:
             exitMsg="Context: " + exitMsg
@@ -433,7 +420,7 @@ class Utils:
         else:
             unhandledEnumType(blockLogAction)
 
-        cmd="%s block-log %s --blocks-dir %s  %s%s%s" % (Utils.LeapClientPath, blockLogActionStr, blockLogLocation, outputFileStr, firstStr, lastStr)
+        cmd="%s block-log %s --blocks-dir %s  %s%s%s" % (Utils.SpringClientPath, blockLogActionStr, blockLogLocation, outputFileStr, firstStr, lastStr)
         if Utils.Debug: Utils.Print("cmd: %s" % (cmd))
         rtn=None
         try:
@@ -523,9 +510,9 @@ class Utils:
         return "comparison of %s type is not supported, context=%s" % (typeName,context)
 
     @staticmethod
-    def compareFiles(file1: str, file2: str):
-        f1 = open(file1)
-        f2 = open(file2)
+    def compareFiles(file1: str, file2: str, mode="r"):
+        f1 = open(file1, mode)
+        f2 = open(file2, mode)
 
         i = 0
         same = True
