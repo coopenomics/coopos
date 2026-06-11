@@ -46,7 +46,7 @@ RUN python3 -m pip install --no-cache-dir pygments
 COPY --from=coopos . /blockchain
 COPY --from=cdt    . /cdt
 
-# Сборка blockchain (coopos). ENABLE_LEAP_DEV_DEB=ON активирует
+# Сборка blockchain (coopos). ENABLE_SPRING_DEV_DEB=ON активирует
 # component-based install (base + dev) и нужен для cpack -G DEB ниже,
 # чтобы получить два deb-пакета: coopos (runtime) и coopos-dev (headers,
 # libs, cmake-config — нужны для сборки контрактов и mono-тестов).
@@ -55,7 +55,7 @@ RUN cd /blockchain \
  && mkdir build && cd build \
  && cmake -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_PREFIX_PATH=/usr/lib/llvm-11 \
-          -DENABLE_LEAP_DEV_DEB=ON \
+          -DENABLE_SPRING_DEV_DEB=ON \
           .. \
  && make -j"$(nproc)" \
  && make install
