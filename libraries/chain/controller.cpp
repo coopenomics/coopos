@@ -994,7 +994,6 @@ struct controller_impl {
    const chain_id_type             chain_id; // read by thread_pool threads, value will not be changed
    std::atomic<bool>               replaying = false;
    chain_historical_exceptions     historical_exceptions; // empty unless loaded by load_historical_exceptions()
-   bool                            replaying = false;
    bool                            is_producer_node = false; // true if node is configured as a block producer
    block_num_type                  pause_at_block_num = std::numeric_limits<block_num_type>::max();
    const db_read_mode              read_mode;
@@ -3367,7 +3366,7 @@ struct controller_impl {
                if( f.builtin_feature ) {
                   if( const auto* suppress = find_suppressed_activation( feature_digest ) ) {
                      wlog( "historical exception: suppressing on_activation handler for feature ${d} at block ${bn}: ${r}",
-                           ("d", feature_digest)("bn", pbhs.block_num)("r", suppress->reason) );
+                           ("d", feature_digest)("bn", bb.block_num())("r", suppress->reason) );
                   } else {
                      trigger_activation_handler( *f.builtin_feature );
                   }
@@ -3427,7 +3426,7 @@ struct controller_impl {
             }
          });
 
-         const uint32_t next_block_num = head->block_num + 1;
+         const uint32_t next_block_num = chain_head.block_num() + 1;
          if( is_onblock_skipped_for_block( next_block_num ) ) {
             wlog( "historical exception: skipping onblock implicit transaction for block ${bn}", ("bn", next_block_num) );
          } else {
