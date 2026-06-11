@@ -38,8 +38,13 @@ enum class builtin_protocol_feature_t : uint32_t {
    bls_primitives = 21,
    disable_deferred_trxs_stage_1 = 22,
    disable_deferred_trxs_stage_2 = 23,
-   savanna = 24,
-   assert_recover_key_account = 25,
+   // ВНИМАНИЕ: digest builtin-фичи зависит от её enum-номера (digest()
+   // пакует _codename). assert_recover_key_account активирована на
+   // mainnet/testnet с digest от номера 24 — менять её номер НЕЛЬЗЯ.
+   // savanna нигде у нас не активирована, поэтому подвинута на 25
+   // (совпадение нашего digest с digest'ом EOS-сетей не требуется).
+   assert_recover_key_account = 24,
+   savanna = 25,
    reserved_private_fork_protocol_features = 500000,
 };
 
