@@ -45,7 +45,6 @@ jobs:
       - name: Checkout coopos
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 0
           path: coopos
 
@@ -61,9 +60,25 @@ jobs:
         with:
           repository: ${{ env.CDT_REPO }}
           ref: ${{ steps.cdtref.outputs.ref }}
-          submodules: recursive
           fetch-depth: 0
           path: cdt
+
+      - name: Init submodules from internal mirrors
+        run: |
+          # Полная изоляция кодовой базы: все сабмодули (включая вложенные)
+          # клонируются с git.coopenomics.world, не с github/googlesource.
+          git config --global url."https://git.coopenomics.world/C9S/".insteadOf "https://github.com/AntelopeIO/"
+          git config --global url."https://git.coopenomics.world/boostorg/".insteadOf "https://github.com/boostorg/"
+          git config --global url."https://git.coopenomics.world/C9S/Catch2".insteadOf "https://github.com/catchorg/Catch2"
+          git config --global url."https://git.coopenomics.world/C9S/rapidjson".insteadOf "https://github.com/Tencent/rapidjson"
+          git config --global url."https://git.coopenomics.world/C9S/secp256k1".insteadOf "https://github.com/bitcoin-core/secp256k1"
+          git config --global url."https://git.coopenomics.world/C9S/prometheus-cpp".insteadOf "https://github.com/jupp0r/prometheus-cpp"
+          git config --global url."https://git.coopenomics.world/C9S/googletest".insteadOf "https://github.com/google/googletest"
+          git config --global url."https://git.coopenomics.world/C9S/civetweb".insteadOf "https://github.com/civetweb/civetweb"
+          git config --global url."https://git.coopenomics.world/C9S/mandel-eosjs".insteadOf "https://github.com/eosnetworkfoundation/mandel-eosjs"
+          git config --global url."https://git.coopenomics.world/C9S/boringssl".insteadOf "https://boringssl.googlesource.com/boringssl"
+          git -C coopos submodule update --init --recursive
+          git -C cdt submodule update --init --recursive
 
       - name: Compute image tags
         id: meta

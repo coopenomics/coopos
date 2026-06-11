@@ -1,42 +1,42 @@
 [submodule "libraries/appbase"]
 	path = libraries/appbase
-	url = https://github.com/AntelopeIO/appbase
+	url = https://git.coopenomics.world/C9S/appbase.git
 [submodule "libraries/chainbase"]
 	path = libraries/chainbase
-	url = https://github.com/AntelopeIO/chainbase
+	url = https://git.coopenomics.world/C9S/chainbase.git
 [submodule "libraries/eos-vm"]
 	path = libraries/eos-vm
-	url = https://github.com/AntelopeIO/eos-vm
+	url = https://git.coopenomics.world/C9S/eos-vm.git
 [submodule "libraries/softfloat"]
 	path = libraries/softfloat
-	url = https://github.com/AntelopeIO/berkeley-softfloat-3
+	url = https://git.coopenomics.world/C9S/berkeley-softfloat-3.git
 [submodule "libraries/rapidjson"]
 	path = libraries/rapidjson
-	url = https://github.com/Tencent/rapidjson/
+	url = https://git.coopenomics.world/C9S/rapidjson.git
 [submodule "tests/abieos"]
 	path = tests/abieos
-	url = https://github.com/AntelopeIO/abieos
+	url = https://git.coopenomics.world/C9S/abieos.git
 [submodule "libraries/libfc/include/fc/crypto/webauthn_json"]
 	path = libraries/libfc/include/fc/crypto/webauthn_json
-	url = https://github.com/Tencent/rapidjson/
+	url = https://git.coopenomics.world/C9S/rapidjson.git
 [submodule "libraries/libfc/secp256k1/secp256k1"]
 	path = libraries/libfc/secp256k1/secp256k1
-	url = https://github.com/bitcoin-core/secp256k1
+	url = https://git.coopenomics.world/C9S/secp256k1.git
 [submodule "libraries/prometheus/prometheus-cpp"]
 	path = libraries/prometheus/prometheus-cpp
-	url = https://github.com/jupp0r/prometheus-cpp.git
+	url = https://git.coopenomics.world/C9S/prometheus-cpp.git
 [submodule "libraries/libfc/libraries/bn256"]
 	path = libraries/libfc/libraries/bn256
-	url = https://github.com/AntelopeIO/bn256
+	url = https://git.coopenomics.world/C9S/bn256.git
 [submodule "libraries/cli11/cli11"]
 	path = libraries/cli11/cli11
-	url = https://github.com/AntelopeIO/CLI11.git
+	url = https://git.coopenomics.world/C9S/CLI11.git
 [submodule "libraries/libfc/libraries/bls12-381"]
 	path = libraries/libfc/libraries/bls12-381
-	url = https://github.com/AntelopeIO/bls12-381
+	url = https://git.coopenomics.world/C9S/bls12-381.git
 [submodule "libraries/boost"]
 	path = libraries/boost
-	url = https://github.com/boostorg/boost.git
+	url = https://git.coopenomics.world/boostorg/boost.git
 [submodule "libraries/libfc/libraries/boringssl/bssl"]
 	path = libraries/libfc/libraries/boringssl/bssl
-	url = https://boringssl.googlesource.com/boringssl
+	url = https://git.coopenomics.world/C9S/boringssl.git
