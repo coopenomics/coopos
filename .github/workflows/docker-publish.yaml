@@ -52,7 +52,9 @@ jobs:
         id: cdtref
         run: |
           REF="${{ inputs.cdt-ref }}"
-          if [ -z "$REF" ]; then REF="v4.2.0"; fi
+          # при тег-пуше inputs пусты — дефолт берём из файла ветки (в savanna там "savanna"),
+          # иначе тег на savanna соберётся со старым CDT v4.2.0
+          if [ -z "$REF" ]; then REF="$(cat coopos/.cicd/default-cdt-ref 2>/dev/null || echo v4.2.0)"; fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       - name: Checkout CDT (${{ steps.cdtref.outputs.ref }})
